@@ -4129,7 +4129,7 @@ function MobileHome({ state, dispatch, heroLevel }) {
         <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>Agenda</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {todayAgenda.slice(0, 5).map(t => {
-            const area = AREAS_SEED.find(a => a.id === t.area);
+            const area = (state.areas || []).find(a => a.id === t.area) || { color: 'var(--ink-3)', icon: '○', name: '' };
             return (
               <div key={t.id}
                 onClick={() => dispatch({ type: 'toggleAgenda', id: t.id })}
