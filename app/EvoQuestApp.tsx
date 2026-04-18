@@ -349,7 +349,6 @@ function foodMacros(foodId, qty) {
 }
 
 function mealTotals(meal) {
-  if (!meal || !meal.items) return { kcal: 0, p: 0, c: 0, f: 0 };
   return meal.items.reduce((acc, it) => {
     const m = foodMacros(it.foodId, it.qty);
     acc.kcal += m.kcal; acc.p += m.p; acc.c += m.c; acc.f += m.f;
@@ -1507,6 +1506,10 @@ function WeeklyScreen({ state, dispatch }) {
           {days.map((d, di) => {
             const iso = dateISO(d);
             const tasks = state.agenda.filter(t => t.date === iso);
+            const activeProjects = projects.filter(p => {
+              const start = p.startDate || p.createdAt;
+              return start && p.due && iso >= start.slice(0,10) && iso <= p.due;
+            });
             return (
               <div key={di} style={{ position: 'relative', borderLeft: '1px solid var(--line)', minHeight: 420 }}>
                 {hours.map(h => <div key={h} style={{ position: 'absolute', top: (h - 6) * 26, left: 0, right: 0, height: 1, background: 'var(--line)', opacity: 0.5 }} />)}
@@ -1630,6 +1633,15 @@ function MonthlyScreen({ state, dispatch }) {
                     );
                   })}
                   {tasks.length > 3 && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>+{tasks.length - 3} mais</div>}
+                {activeProjects.slice(0, 2).map(p => {
+                  const pa = areas.find(a => a.id === p.area) || { color: 'var(--inteligencia)' };
+                  const isStart = (p.startDate || p.createdAt)?.slice(0,10) === iso;
+                  return (
+                    <div key={p.id} title={p.name} style={{ fontSize: 9, padding: '1px 4px', borderRadius: 2, background: 'color-mix(in oklch, ' + pa.color + ' 18%, transparent)', borderLeft: isStart ? '2px solid ' + pa.color : 'none', color: pa.color, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {isStart ? '▶ ' : ''}{p.name}
+                    </div>
+                  );
+                })}
                 </div>
               </div>
             );
@@ -2031,11 +2043,15 @@ function Heatmap({ data, color }) {
   );
 }
 
-// ═══ screens-para.jsx ═══
-// screens-para.jsx — Projects/Areas/Resources/Archives
+const STATUS_CFG = {
+  inbox:        { label: 'Inbox',          color: 'var(--ink-4)' },
+  planned:      { label: 'Planejado',      color: 'var(--inteligencia)' },
+  'in-progress':{ label: 'Em andamento',   color: 'var(--sabedoria)' },
+  done:         { label: 'Concluído',      color: 'var(--vitalidade)' },
+};
+const STATUS_ORDER = ['inbox', 'planned', 'in-progress', 'done'];
 
 function ParaScreen({ state, dispatch, para }) {
-  // para = 'projects' | 'areas' | 'resources' | 'archives'
   if (para === 'projects') return <ProjectsView state={state} dispatch={dispatch} />;
   if (para === 'areas') return <AreasView state={state} dispatch={dispatch} />;
   if (para === 'resources') return <ResourcesView state={state} dispatch={dispatch} />;
@@ -2043,16 +2059,273 @@ function ParaScreen({ state, dispatch, para }) {
   return null;
 }
 
+function ProjectCard({ p, areas, onClick, onDelete, onStatusChange }) {
+  const area = areas.find(a => a.id === p.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
+  const st = STATUS_CFG[p.status || 'inbox'];
+  const subtasks = p.subtasks || [];
+  const doneSubs = subtasks.filter(t => t.done).length;
+  const progress = subtasks.length ? doneSubs / subtasks.length : (p.progress || 0);
+  const daysLeft = p.due ? Math.ceil((new Date(p.due) - today) / 86400000) : null;
+  return (
+    <div className="card" style={{ padding: 18, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+      onClick={() => onClick(p)}
+      onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-2)'}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = ''}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: area.color, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <span>{area.icon}</span> {area.name}
+        </div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <select
+            value={p.status || 'inbox'}
+            onChange={e => { e.stopPropagation(); onStatusChange(p.id, e.target.value); }}
+            onClick={e => e.stopPropagation()}
+            style={{ fontSize: 10, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--line)', background: 'var(--surface)', color: st.color, fontWeight: 600, cursor: 'pointer' }}>
+            {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_CFG[s].label}</option>)}
+          </select>
+          <button className="btn ghost" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); if (confirm(`Excluir "${p.name}"?`)) onDelete(p.id); }}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      </div>
+      <div className="serif" style={{ fontSize: 19, lineHeight: 1.25, color: 'var(--ink)', marginBottom: 10 }}>{p.name}</div>
+      <div className="xp-bar" style={{ height: 5 }}>
+        <div className="fill" style={{ width: `${progress * 100}%`, '--hue': area.color }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-3)', marginTop: 5 }}>
+        <span className="mono">{doneSubs}/{subtasks.length || (p.tasks || 0)} tasks</span>
+        <span className="mono">{Math.round(progress * 100)}%</span>
+      </div>
+      {daysLeft !== null && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: daysLeft < 14 ? 'var(--forca)' : 'var(--ink-3)' }}>
+            <Icon name="clock" size={11} /> <span className="mono">{daysLeft}d</span>
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{new Date(p.due).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KanbanView({ projects, areas, onOpen, onDelete, onStatusChange }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, alignItems: 'start' }}>
+      {STATUS_ORDER.map(status => {
+        const st = STATUS_CFG[status];
+        const col = projects.filter(p => (p.status || 'inbox') === status);
+        return (
+          <div key={status}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 8, borderLeft: `3px solid ${st.color}` }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: st.color, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{st.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--ink-4)', marginLeft: 'auto' }} className="mono">{col.length}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {col.map(p => (
+                <ProjectCard key={p.id} p={p} areas={areas} onClick={onOpen} onDelete={onDelete} onStatusChange={onStatusChange} />
+              ))}
+              {col.length === 0 && (
+                <div style={{ padding: '20px 14px', border: '1px dashed var(--line)', borderRadius: 10, textAlign: 'center', fontSize: 12, color: 'var(--ink-4)' }}>
+                  Vazio
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GanttView({ projects, areas }) {
+  const rangeStart = new Date('2026-01-01');
+  const rangeEnd = new Date('2026-12-31');
+  const totalDays = (rangeEnd - rangeStart) / 86400000;
+  const months = Array.from({ length: 12 }, (_, i) => new Date(2026, i, 1));
+
+  function pct(dateStr) {
+    if (!dateStr) return 0;
+    const d = new Date(dateStr);
+    return Math.max(0, Math.min(100, ((d - rangeStart) / (rangeEnd - rangeStart)) * 100));
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Month header */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)' }}>
+        <div style={{ width: 220, flexShrink: 0, padding: '10px 16px', fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', borderRight: '1px solid var(--line)' }}>Projeto</div>
+        <div style={{ flex: 1, position: 'relative', height: 38 }}>
+          {months.map((m, i) => (
+            <div key={i} style={{ position: 'absolute', left: `${(i / 12) * 100}%`, top: 0, bottom: 0, borderLeft: '1px solid var(--line)', display: 'flex', alignItems: 'center', paddingLeft: 6, fontSize: 10, color: 'var(--ink-4)', fontWeight: 500 }}>
+              {m.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Today line */}
+      {projects.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>Nenhum projeto com datas definidas.</div>
+      ) : (
+        projects.map((p, i) => {
+          const area = areas.find(a => a.id === p.area) || { color: 'var(--ink-3)', name: 'Sem área' };
+          const st = STATUS_CFG[p.status || 'inbox'];
+          const left = pct(p.startDate || p.createdAt);
+          const right = pct(p.due);
+          const width = Math.max(0.5, right - left);
+          return (
+            <div key={p.id} style={{ display: 'flex', borderBottom: i < projects.length - 1 ? '1px solid var(--line)' : 'none', background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
+              <div style={{ width: 220, flexShrink: 0, padding: '10px 16px', borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <div style={{ fontSize: 10, color: area.color, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{area.name}</div>
+              </div>
+              <div style={{ flex: 1, position: 'relative', height: 48 }}>
+                {/* today marker */}
+                <div style={{ position: 'absolute', left: `${pct(dateISO(today))}%`, top: 0, bottom: 0, width: 1, background: 'var(--forca)', opacity: 0.4, zIndex: 1 }} />
+                <div style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, top: '50%', transform: 'translateY(-50%)', height: 22, borderRadius: 4, background: `color-mix(in oklch, ${area.color} 30%, var(--surface))`, border: `1.5px solid ${area.color}`, display: 'flex', alignItems: 'center', paddingLeft: 6, overflow: 'hidden' }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: area.color, whiteSpace: 'nowrap' }}>{p.name}</span>
+                  <span style={{ fontSize: 9, color: st.color, marginLeft: 6, flexShrink: 0 }}>● {st.label}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function ProjectDetailModal({ project, state, dispatch, onClose, onEdit }) {
+  const areas = state.areas || [];
+  const resources = state.resources || [];
+  const area = areas.find(a => a.id === project.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
+  const st = STATUS_CFG[project.status || 'inbox'];
+  const subtasks = project.subtasks || [];
+  const linkedResources = (project.resources || []).map(rid => resources.find(r => r.id === rid)).filter(Boolean);
+  const [newTask, setNewTask] = React.useState('');
+  const doneSubs = subtasks.filter(t => t.done).length;
+  const progress = subtasks.length ? doneSubs / subtasks.length : (project.progress || 0);
+
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  function addTask() {
+    if (newTask.trim().length < 2) return;
+    dispatch({ type: 'addProjectTask', id: project.id, task: { id: 'st' + Date.now(), text: newTask.trim(), done: false } });
+    setNewTask('');
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', zIndex: 1000, backdropFilter: 'blur(4px)', animation: 'fadeUp 0.2s ease' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 480, height: '100%', background: 'var(--surface)', borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 32px rgba(0,0,0,0.18)', animation: 'slideIn 0.25s ease', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ padding: '24px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ fontSize: 11, color: area.color, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{area.icon} {area.name}</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="btn ghost" style={{ fontSize: 12, padding: '4px 8px' }} onClick={onEdit}><Icon name="edit" size={12} /> Editar</button>
+              <button className="btn ghost" style={{ padding: 4 }} onClick={onClose}><Icon name="x" size={14} /></button>
+            </div>
+          </div>
+          <div className="serif" style={{ fontSize: 26, lineHeight: 1.2, color: 'var(--ink)', marginBottom: 10 }}>{project.name}</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: st.color, padding: '2px 8px', borderRadius: 999, background: `color-mix(in oklch, ${st.color} 12%, transparent)`, border: `1px solid ${st.color}` }}>{st.label}</span>
+            {project.due && <span style={{ fontSize: 11, color: 'var(--ink-3)' }} className="mono">até {new Date(project.due).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: '2-digit' })}</span>}
+          </div>
+          {project.description && <div style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 10, lineHeight: 1.55 }}>{project.description}</div>}
+          <div style={{ marginTop: 12 }}>
+            <div className="xp-bar" style={{ height: 6 }}>
+              <div className="fill" style={{ width: `${progress * 100}%`, '--hue': area.color }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }} className="mono">{doneSubs}/{subtasks.length} concluídas · {Math.round(progress * 100)}%</div>
+          </div>
+        </div>
+
+        {/* To-do list */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>Tarefas</div>
+
+          {/* Add task */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <input
+              value={newTask}
+              onChange={e => setNewTask(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addTask()}
+              placeholder="Nova tarefa… (Enter para adicionar)"
+              style={{ flex: 1, padding: '8px 12px', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
+            />
+            <button className="btn primary" onClick={addTask} style={{ flexShrink: 0, padding: '8px 12px' }}><Icon name="plus" size={13} /></button>
+          </div>
+
+          {subtasks.length === 0 && (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>
+              Nenhuma tarefa ainda. Adicione acima.
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {subtasks.map(t => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', transition: 'opacity 0.15s', opacity: t.done ? 0.55 : 1 }}>
+                <Checkbox checked={t.done} onChange={() => dispatch({ type: 'toggleProjectTask', id: project.id, taskId: t.id, attr: project.attr })} />
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--ink)', textDecoration: t.done ? 'line-through' : 'none' }}>{t.text}</span>
+                <button onClick={() => dispatch({ type: 'deleteProjectTask', id: project.id, taskId: t.id })} style={{ background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', padding: 2, borderRadius: 3, display: 'flex' }}>
+                  <Icon name="x" size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Linked resources */}
+          {linkedResources.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>Resources vinculados</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {linkedResources.map(r => (
+                  <div key={r.id} style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>{r.icon || '📄'}</span>
+                    <span style={{ fontSize: 13, color: 'var(--ink)' }}>{r.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectsView({ state, dispatch }) {
   const [filter, setFilter] = React.useState('all');
+  const [view, setView] = React.useState('cards'); // cards | kanban | gantt
   const [showNew, setShowNew] = React.useState(false);
+  const [detailProject, setDetailProject] = React.useState(null);
+  const [editProject, setEditProject] = React.useState(null);
   const projects = state.projects || [];
   const areas = state.areas || [];
-  return (
-    <div style={{ padding: '28px 40px', maxWidth: 1300, margin: '0 auto' }}>
-      <ParaHeader label="P · Projects" title="Projetos ativos" subtitle="Iniciativas com prazo e resultado definido" />
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+  const filtered = projects.filter(p => filter === 'all' || p.area === filter);
+
+  function handleStatusChange(id, newStatus) {
+    dispatch({ type: 'updateProject', id, patch: { status: newStatus } });
+  }
+
+  function handleDelete(id) {
+    dispatch({ type: 'deleteProject', id });
+    if (detailProject?.id === id) setDetailProject(null);
+  }
+
+  // sync detailProject with latest state
+  const liveDetail = detailProject ? projects.find(p => p.id === detailProject.id) || null : null;
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <ParaHeader label="P · Projects" title="Projetos" subtitle="Iniciativas com prazo e resultado definido" />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Area filters */}
         <button className={`btn ${filter === 'all' ? 'primary' : ''}`} onClick={() => setFilter('all')} style={{ fontSize: 12 }}>Todos</button>
         {areas.map(area => (
           <button key={area.id} className={`btn ${filter === area.id ? 'primary' : ''}`} onClick={() => setFilter(area.id)} style={{ fontSize: 12 }}>
@@ -2060,8 +2333,13 @@ function ProjectsView({ state, dispatch }) {
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        <button className="btn primary" onClick={() => setShowNew(true)} disabled={areas.length === 0}
-          style={{ opacity: areas.length === 0 ? 0.5 : 1, cursor: areas.length === 0 ? 'not-allowed' : 'pointer' }}>
+        {/* View toggles */}
+        <div style={{ display: 'flex', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+          {[['cards', '▦ Cards'], ['kanban', '⊞ Kanban'], ['gantt', '≡ Gantt']].map(([v, label]) => (
+            <button key={v} onClick={() => setView(v)} style={{ padding: '6px 12px', fontSize: 12, fontWeight: view === v ? 600 : 400, color: view === v ? 'var(--ink)' : 'var(--ink-3)', background: view === v ? 'var(--surface-2)' : 'transparent', border: 'none', cursor: 'pointer' }}>{label}</button>
+          ))}
+        </div>
+        <button className="btn primary" onClick={() => setShowNew(true)} disabled={areas.length === 0} style={{ opacity: areas.length === 0 ? 0.5 : 1 }}>
           <Icon name="plus" size={14} /> Novo projeto
         </button>
       </div>
@@ -2073,80 +2351,73 @@ function ProjectsView({ state, dispatch }) {
             title={areas.length === 0 ? 'Crie uma Área primeiro' : 'Nenhum projeto ainda'}
             hint={areas.length === 0
               ? 'Projetos vivem dentro de Áreas de responsabilidade. Crie pelo menos uma Área (ex: Saúde, Carreira, Finanças) para começar.'
-              : 'Projetos têm início, fim e um resultado concreto — ex: “lançar o MVP”, “correr uma prova de 10k”.'}
+              : 'Projetos têm início, fim e um resultado concreto — ex: "lançar o MVP", "correr uma prova de 10k".'}
           />
         </div>
+      ) : view === 'kanban' ? (
+        <KanbanView projects={filtered} areas={areas} onOpen={setDetailProject} onDelete={handleDelete} onStatusChange={handleStatusChange} />
+      ) : view === 'gantt' ? (
+        <GanttView projects={filtered} areas={areas} />
       ) : (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-        {projects.filter(p => filter === 'all' || p.area === filter).map(p => {
-          const area = areas.find(a => a.id === p.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
-          const daysLeft = Math.ceil((new Date(p.due) - today) / 86400000);
-          return (
-            <div key={p.id} className="card" style={{ padding: 18 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: area.color, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  <span>{area.icon}</span> {area.name}
-                </div>
-                <button className="btn ghost" style={{ padding: 2 }}><Icon name="dots" size={14} /></button>
-              </div>
-              <div className="serif" style={{ fontSize: 20, lineHeight: 1.25, color: 'var(--ink)', marginBottom: 12 }}>{p.name}</div>
-
-              <div className="xp-bar" style={{ height: 6 }}>
-                <div className="fill" style={{ width: `${p.progress * 100}%`, '--hue': area.color }} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>
-                <span className="mono">{p.done}/{p.tasks} tarefas</span>
-                <span className="mono">{Math.round(p.progress * 100)}%</span>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: daysLeft < 30 ? 'var(--forca)' : 'var(--ink-3)' }}>
-                  <Icon name="clock" size={12} />
-                  <span className="mono">{daysLeft}d</span>
-                </div>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{new Date(p.due).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+          {filtered.map(p => (
+            <ProjectCard key={p.id} p={p} areas={areas} onClick={setDetailProject} onDelete={handleDelete} onStatusChange={handleStatusChange} />
+          ))}
+        </div>
       )}
 
-      {showNew && <NewProjectModal areas={areas} onClose={() => setShowNew(false)} onCreate={(proj) => {
+      {showNew && <NewProjectModal areas={areas} resources={state.resources || []} onClose={() => setShowNew(false)} onCreate={(proj) => {
         dispatch({ type: 'addProject', project: proj });
         setShowNew(false);
       }} />}
+
+      {editProject && <NewProjectModal areas={areas} resources={state.resources || []} initial={editProject} onClose={() => setEditProject(null)} onCreate={(proj) => {
+        dispatch({ type: 'updateProject', id: editProject.id, patch: proj });
+        setEditProject(null);
+        setDetailProject(null);
+      }} />}
+
+      {liveDetail && <ProjectDetailModal project={liveDetail} state={state} dispatch={dispatch} onClose={() => setDetailProject(null)} onEdit={() => { setEditProject(liveDetail); }} />}
     </div>
   );
 }
 
-function NewProjectModal({ areas, onClose, onCreate }) {
-  const [name, setName] = React.useState('');
-  const [area, setArea] = React.useState(areas[0]?.id || 'a1');
-  const [due, setDue] = React.useState(() => {
+function NewProjectModal({ areas, resources = [], initial = null, onClose, onCreate }) {
+  const isEdit = !!initial;
+  const [name, setName] = React.useState(initial?.name || '');
+  const [area, setArea] = React.useState(initial?.area || areas[0]?.id || '');
+  const [status, setStatus] = React.useState(initial?.status || 'inbox');
+  const [startDate, setStartDate] = React.useState(initial?.startDate || dateISO(today));
+  const [due, setDue] = React.useState(initial?.due || (() => {
     const d = new Date(today); d.setMonth(d.getMonth() + 1);
     return d.toISOString().slice(0, 10);
-  });
-  const [tasks, setTasks] = React.useState(10);
-  const [description, setDescription] = React.useState('');
-  const [priority, setPriority] = React.useState('medium');
+  })());
+  const [description, setDescription] = React.useState(initial?.description || '');
+  const [priority, setPriority] = React.useState(initial?.priority || 'medium');
+  const [attr, setAttr] = React.useState(initial?.attr || 'disciplina');
+  const [linkedRes, setLinkedRes] = React.useState(initial?.resources || []);
 
   const canCreate = name.trim().length >= 2;
 
   function submit() {
     if (!canCreate) return;
     const proj = {
-      id: 'p' + Date.now(),
+      ...(initial || {}),
+      id: initial?.id || ('p' + Date.now()),
       name: name.trim(),
       area,
-      progress: 0,
+      status,
+      startDate,
       due,
-      tasks: Number(tasks) || 1,
-      done: 0,
-      status: 'active',
       description: description.trim() || undefined,
       priority,
-      createdAt: new Date().toISOString(),
+      attr,
+      resources: linkedRes,
+      progress: initial?.progress || 0,
+      tasks: initial?.tasks || 10,
+      done: initial?.done || 0,
+      subtasks: initial?.subtasks || [],
+      createdAt: initial?.createdAt || new Date().toISOString(),
     };
     onCreate(proj);
   }
@@ -2159,67 +2430,72 @@ function NewProjectModal({ areas, onClose, onCreate }) {
 
   const selectedArea = areas.find(a => a.id === area) || areas[0] || { desc: '' };
 
+  function toggleRes(id) {
+    setLinkedRes(prev => prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]);
+  }
+
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 1000, padding: 20,
-      backdropFilter: 'blur(4px)',
-      animation: 'fadeUp 0.2s ease',
-    }}>
-      <div onClick={e => e.stopPropagation()} className="card" style={{
-        width: '100%', maxWidth: 620, padding: 28, maxHeight: '90vh', overflow: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-      }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20, backdropFilter: 'blur(4px)', animation: 'fadeUp 0.2s ease' }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 640, padding: 28, maxHeight: '92vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
           <div>
             <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Sistema PARA · Project</div>
-            <div className="serif" style={{ fontSize: 28, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>Novo projeto</div>
+            <div className="serif" style={{ fontSize: 28, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>{isEdit ? 'Editar projeto' : 'Novo projeto'}</div>
           </div>
-          <button className="btn ghost" onClick={onClose} style={{ padding: 4 }}>
-            <Icon name="x" size={16} />
-          </button>
-        </div>
-
-        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.5 }}>
-          Projetos têm <strong style={{ color: 'var(--ink-2)' }}>início, fim e um resultado concreto</strong>. São esforços finitos, sempre dentro de uma Área.
+          <button className="btn ghost" onClick={onClose} style={{ padding: 4 }}><Icon name="x" size={16} /></button>
         </div>
 
         {/* Name */}
-        <div style={{ marginTop: 20 }}>
-          <label style={FIELD_LABEL}>Nome do projeto *</label>
+        {/* Name */}
+        <div style={{ marginTop: 0 }}>
           <input value={name} onChange={e => setName(e.target.value)} autoFocus
             placeholder="Ex: Lançar MVP, Aprender espanhol, Reformar cozinha…"
             style={FIELD_INPUT} />
         </div>
 
+        {/* Status */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Status</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {STATUS_ORDER.map(s => {
+              const sc = STATUS_CFG[s];
+              return (
+                <button key={s} onClick={() => setStatus(s)}
+                  style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `1.5px solid ${status === s ? sc.color : 'var(--line)'}`, background: status === s ? `color-mix(in oklch, ${sc.color} 12%, var(--surface))` : 'var(--surface)', color: status === s ? sc.color : 'var(--ink-3)', fontFamily: 'inherit' }}>
+                  {sc.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Area */}
         <div style={{ marginTop: 16 }}>
           <label style={FIELD_LABEL}>Área de responsabilidade</label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 6, marginTop: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 6, marginTop: 6 }}>
             {areas.map(a => (
               <button key={a.id} onClick={() => setArea(a.id)}
                 className={area === a.id ? 'class-btn active' : 'class-btn'}
                 style={{ textAlign: 'left', padding: '8px 10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ color: a.color, fontSize: 14 }}>{a.icon}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>{a.name}</span>
                 </div>
               </button>
             ))}
           </div>
-          {selectedArea.desc && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{selectedArea.desc}</div>}
+          {selectedArea?.desc && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{selectedArea.desc}</div>}
         </div>
 
-        {/* Due date + tasks */}
+        {/* Dates */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+          <div>
+            <label style={FIELD_LABEL}>Data de início</label>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={FIELD_INPUT} />
+          </div>
           <div>
             <label style={FIELD_LABEL}>Prazo</label>
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={FIELD_INPUT} />
-          </div>
-          <div>
-            <label style={FIELD_LABEL}>Tarefas estimadas</label>
-            <input type="number" min="1" max="200" value={tasks} onChange={e => setTasks(e.target.value)} style={FIELD_INPUT} />
           </div>
         </div>
 
@@ -2227,15 +2503,21 @@ function NewProjectModal({ areas, onClose, onCreate }) {
         <div style={{ marginTop: 16 }}>
           <label style={FIELD_LABEL}>Prioridade</label>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            {[
-              { id: 'low',    label: 'Baixa',  color: 'var(--ink-3)' },
-              { id: 'medium', label: 'Média',  color: 'var(--sabedoria)' },
-              { id: 'high',   label: 'Alta',   color: 'var(--forca)' },
-            ].map(p => (
-              <button key={p.id} onClick={() => setPriority(p.id)}
-                className={priority === p.id ? 'class-btn active' : 'class-btn'}
-                style={{ flex: 1, padding: '8px 10px', fontSize: 12, fontWeight: 500 }}>
-                <span style={{ color: p.color, marginRight: 6 }}>●</span>{p.label}
+            {[{ id: 'low', label: 'Baixa', color: 'var(--ink-3)' }, { id: 'medium', label: 'Média', color: 'var(--sabedoria)' }, { id: 'high', label: 'Alta', color: 'var(--forca)' }].map(p => (
+              <button key={p.id} onClick={() => setPriority(p.id)} className={priority === p.id ? 'class-btn active' : 'class-btn'} style={{ flex: 1, padding: '7px 8px', fontSize: 12, fontWeight: 500 }}>
+                <span style={{ color: p.color, marginRight: 5 }}>●</span>{p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Attribute for XP */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Atributo (XP das tarefas)</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {ATTRIBUTES.map(a => (
+              <button key={a.id} onClick={() => setAttr(a.id)} style={{ padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: `1.5px solid ${attr === a.id ? a.hue : 'var(--line)'}`, background: attr === a.id ? `color-mix(in oklch, ${a.hue} 14%, var(--surface))` : 'var(--surface)', color: attr === a.id ? a.hue : 'var(--ink-3)', fontFamily: 'inherit' }}>
+                {a.abbr}
               </button>
             ))}
           </div>
@@ -2243,20 +2525,33 @@ function NewProjectModal({ areas, onClose, onCreate }) {
 
         {/* Description */}
         <div style={{ marginTop: 16 }}>
-          <label style={FIELD_LABEL}>Descrição / resultado esperado <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+          <label style={FIELD_LABEL}>Descrição <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
           <textarea value={description} onChange={e => setDescription(e.target.value)}
             placeholder="Como é o 'pronto' desse projeto?"
-            rows={3}
-            style={{ ...FIELD_INPUT, resize: 'vertical', minHeight: 60, fontFamily: 'inherit' }} />
+            rows={2} style={{ ...FIELD_INPUT, resize: 'vertical', minHeight: 52, fontFamily: 'inherit' }} />
         </div>
+
+        {/* Link Resources */}
+        {resources.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <label style={FIELD_LABEL}>Resources vinculados <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+              {resources.map(r => (
+                <button key={r.id} onClick={() => toggleRes(r.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${linkedRes.includes(r.id) ? 'var(--accent)' : 'var(--line)'}`, background: linkedRes.includes(r.id) ? 'color-mix(in oklch, var(--accent) 8%, var(--surface))' : 'var(--surface)', fontFamily: 'inherit', textAlign: 'left' }}>
+                  <span style={{ fontSize: 15 }}>{r.icon || '📄'}</span>
+                  <span style={{ fontSize: 13, color: 'var(--ink)', flex: 1 }}>{r.name}</span>
+                  {linkedRes.includes(r.id) && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
-          <button className="btn primary" onClick={submit} disabled={!canCreate} style={{
-            fontSize: 13, padding: '10px 18px',
-            opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed',
-          }}>
-            Criar projeto
+          <button className="btn primary" onClick={submit} disabled={!canCreate} style={{ fontSize: 13, padding: '10px 18px', opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed' }}>
+            {isEdit ? 'Salvar alterações' : 'Criar projeto'}
           </button>
         </div>
       </div>
@@ -2264,13 +2559,9 @@ function NewProjectModal({ areas, onClose, onCreate }) {
   );
 }
 
-const FIELD_LABEL = { fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 };
-const FIELD_INPUT = {
-  width: '100%', padding: '10px 12px',
-  background: 'var(--surface)', border: '1px solid var(--line)',
-  borderRadius: 8, color: 'var(--ink)', fontSize: 14,
-  fontFamily: 'inherit', outline: 'none',
-};
+// ═══ screens-para.jsx ═══
+// screens-para.jsx — Projects/Areas/Resources/Archives
+
 
 function AreasView({ state, dispatch }) {
   const [showNew, setShowNew] = React.useState(false);
@@ -2703,8 +2994,8 @@ function ChartsScreen({ state, tweaks }) {
   const totals = ATTRIBUTES.map(a => ({
     attr: a,
     curr: state.attrXp[a.id],
-    delta: data.length === 0 ? 0 : data[data.length - 1][a.id] - data[0][a.id],
-    series: data.length === 0 ? [] : data.map(d => d[a.id]),
+    delta: data[data.length - 1][a.id] - data[0][a.id],
+    series: data.map(d => d[a.id]),
   }));
 
   return (
@@ -3024,14 +3315,13 @@ function GoalsScreen({ state }) {
 // screens-workout.jsx — Workout builder (Funcional + Musculação)
 
 function WorkoutScreen({ state, dispatch }) {
-  const [selectedWId, setSelectedWId] = React.useState(state.workouts[0]?.id || null);
+  const [selectedWId, setSelectedWId] = React.useState(state.workouts[0].id);
   const [filter, setFilter] = React.useState('all'); // all | musc | func | cardio | mob
   const [showLibrary, setShowLibrary] = React.useState(false);
   const [libGroup, setLibGroup] = React.useState('all');
   const [libQuery, setLibQuery] = React.useState('');
 
   const workout = state.workouts.find(w => w.id === selectedWId);
-  if (!workout) return <div style={{padding:40}}>Nenhum treino cadastrado ainda.</div>;
   const totalSets = workout.exercises.reduce((a, e) => a + e.sets, 0);
   const doneCount = workout.exercises.filter(e => e.done).length;
   const progress = workout.exercises.length ? doneCount / workout.exercises.length : 0;
@@ -3472,7 +3762,7 @@ function ExerciseLibraryModal({ onClose, onAdd, libGroup, setLibGroup, libQuery,
 // screens-diet.jsx — Diet builder with macros, meals, water
 
 function DietScreen({ state, dispatch }) {
-  const [selectedMId, setSelectedMId] = React.useState(state.meals[0]?.id || null);
+  const [selectedMId, setSelectedMId] = React.useState(state.meals[0].id);
   const [showFoodLib, setShowFoodLib] = React.useState(false);
   const [libCat, setLibCat] = React.useState('all');
   const [libQuery, setLibQuery] = React.useState('');
@@ -3609,7 +3899,6 @@ function DietScreen({ state, dispatch }) {
 
         {/* Center: meal detail */}
         <div className="card" style={{ padding: 24 }}>
-          {!meal ? <div style={{ padding: 24, color: 'var(--ink-3)' }}>Nenhuma refeição cadastrada ainda.</div> : <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
@@ -3702,7 +3991,6 @@ function DietScreen({ state, dispatch }) {
           >
             <Icon name="plus" size={12} /> Adicionar alimento
           </button>
-          </>}
         </div>
 
         {/* Right: day summary */}
@@ -4129,7 +4417,7 @@ function MobileHome({ state, dispatch, heroLevel }) {
         <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>Agenda</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {todayAgenda.slice(0, 5).map(t => {
-            const area = (state.areas || []).find(a => a.id === t.area) || { color: 'var(--ink-3)', icon: '○', name: '' };
+            const area = AREAS_SEED.find(a => a.id === t.area);
             return (
               <div key={t.id}
                 onClick={() => dispatch({ type: 'toggleAgenda', id: t.id })}
@@ -4624,6 +4912,40 @@ function reducer(state, action) {
     }
     case 'deleteProject': {
       return { ...state, projects: (state.projects || []).filter(p => p.id !== action.id) };
+    }
+    case 'updateProject': {
+      return { ...state, projects: (state.projects || []).map(p => p.id === action.id ? { ...p, ...action.patch } : p) };
+    }
+    case 'addProjectTask': {
+      return { ...state, projects: (state.projects || []).map(p => p.id === action.id ? { ...p, subtasks: [...(p.subtasks || []), action.task] } : p) };
+    }
+    case 'toggleProjectTask': {
+      const projects = (state.projects || []).map(p => {
+        if (p.id !== action.id) return p;
+        const subtasks = (p.subtasks || []).map(t => t.id === action.taskId ? { ...t, done: !t.done } : t);
+        const done = subtasks.filter(t => t.done).length;
+        const progress = subtasks.length ? done / subtasks.length : 0;
+        return { ...p, subtasks, done, progress };
+      });
+      const proj = projects.find(p => p.id === action.id);
+      const task = (proj?.subtasks || []).find(t => t.id === action.taskId);
+      const wasUndone = task && !task.done; // task.done is now toggled, original was !done
+      const delta = wasUndone ? 0 : 15; // we need to check the NEW state
+      const toggled = proj?.subtasks?.find(t => t.id === action.taskId);
+      const xpDelta = toggled?.done ? 15 : -15;
+      const attrKey = action.attr || 'disciplina';
+      const attrXp = { ...state.attrXp, [attrKey]: Math.max(0, state.attrXp[attrKey] + xpDelta) };
+      const xpGainedToday = Math.max(0, state.xpGainedToday + xpDelta);
+      const toasts = xpDelta > 0 ? [...state.toasts, { id: Date.now(), xp: xpDelta, attr: attrKey, name: toggled?.text || 'Tarefa' }] : state.toasts;
+      return { ...state, projects, attrXp, xpGainedToday, toasts };
+    }
+    case 'deleteProjectTask': {
+      return { ...state, projects: (state.projects || []).map(p => {
+        if (p.id !== action.id) return p;
+        const subtasks = (p.subtasks || []).filter(t => t.id !== action.taskId);
+        const done = subtasks.filter(t => t.done).length;
+        return { ...p, subtasks, done, progress: subtasks.length ? done / subtasks.length : 0 };
+      })};
     }
     case 'toggleExercise': {
       const workouts = state.workouts.map(w => {
