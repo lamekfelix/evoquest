@@ -535,3 +535,4 @@ function FoodLibraryModal({ onClose, onAdd, libCat, setLibCat, libQuery, setLibQ
     </div>
   );
 }
+Object.assign(window, { WorkoutScreen });
