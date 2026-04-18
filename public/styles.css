@@ -1,0 +1,261 @@
+/* EvoQuest — design tokens */
+:root {
+  /* Paper / ink theme (default) */
+  --bg: #F4F1EA;
+  --bg-2: #EFEBE2;
+  --surface: #FBF9F4;
+  --surface-2: #F7F3EA;
+  --ink: #1A1714;
+  --ink-2: #3D3730;
+  --ink-3: #6B6359;
+  --ink-4: #9A9185;
+  --line: #E3DDD1;
+  --line-2: #D5CDBE;
+  --accent: #8B6F47;   /* warm tan */
+  --accent-2: #2B2620;
+
+  /* Attribute hues (oklch, same chroma/lightness, varying hue) */
+  --forca:       oklch(0.62 0.12 25);    /* crimson */
+  --inteligencia:oklch(0.62 0.12 260);   /* indigo */
+  --sabedoria:   oklch(0.62 0.12 85);    /* ochre */
+  --disciplina:  oklch(0.62 0.12 320);   /* plum */
+  --foco:        oklch(0.62 0.12 200);   /* teal */
+  --vitalidade:  oklch(0.62 0.12 140);   /* moss */
+  --resiliencia: oklch(0.62 0.12 40);    /* umber */
+  --equilibrio:  oklch(0.62 0.12 160);   /* sage */
+
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  --shadow-1: 0 1px 2px rgba(26,23,20,0.04), 0 1px 3px rgba(26,23,20,0.06);
+  --shadow-2: 0 4px 12px rgba(26,23,20,0.06), 0 1px 3px rgba(26,23,20,0.04);
+
+  --font-serif: 'Instrument Serif', 'Cormorant Garamond', Georgia, serif;
+  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+}
+
+[data-theme="ink"] {
+  --bg: #14120F;
+  --bg-2: #1A1714;
+  --surface: #1F1B17;
+  --surface-2: #26211C;
+  --ink: #F0EBE0;
+  --ink-2: #C9C1B3;
+  --ink-3: #8F887B;
+  --ink-4: #5F5A51;
+  --line: #2C2722;
+  --line-2: #3A342D;
+  --accent: #C9A56B;
+  --accent-2: #F0EBE0;
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-2: 0 4px 12px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
+}
+
+[data-theme="forest"] {
+  --bg: #E8EDE4;
+  --bg-2: #DDE4D8;
+  --surface: #F2F5ED;
+  --surface-2: #E8EDE2;
+  --ink: #1B201A;
+  --ink-2: #3A4135;
+  --ink-3: #616A5A;
+  --ink-4: #929A89;
+  --line: #D1D8C8;
+  --line-2: #BDC6B2;
+  --accent: #5E7A4A;
+  --accent-2: #2B311F;
+}
+
+[data-theme="dusk"] {
+  --bg: #EBE7EE;
+  --bg-2: #E1DCE7;
+  --surface: #F4F0F7;
+  --surface-2: #EAE5EF;
+  --ink: #1B1820;
+  --ink-2: #3A3445;
+  --ink-3: #635A72;
+  --ink-4: #928AA0;
+  --line: #D7D1DF;
+  --line-2: #C4BCCF;
+  --accent: #6B5B8A;
+  --accent-2: #28222E;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+body { font-size: 14px; line-height: 1.5; }
+
+.serif { font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.01em; }
+.mono { font-family: var(--font-mono); font-feature-settings: 'tnum'; }
+
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+input, textarea { font-family: inherit; color: inherit; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 500; color: var(--ink-2);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  transition: all 0.15s ease;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--line-2); }
+.btn.primary { background: var(--accent-2); color: var(--bg); border-color: var(--accent-2); }
+.btn.primary:hover { opacity: 0.9; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-3); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+/* Animations */
+@keyframes xpGain {
+  0% { transform: translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-32px); opacity: 0; }
+}
+.xp-float {
+  position: absolute; pointer-events: none;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  animation: xpGain 1.2s ease-out forwards;
+  color: var(--accent);
+}
+
+@keyframes levelUp {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); filter: brightness(1.15); }
+  100% { transform: scale(1); }
+}
+.level-up { animation: levelUp 0.6s ease-out; }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.slide-in { animation: slideIn 0.3s ease-out; }
+
+.checkbox {
+  width: 18px; height: 18px; border-radius: 5px;
+  border: 1.5px solid var(--line-2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.checkbox:hover { border-color: var(--ink-3); }
+.checkbox.checked { background: var(--accent-2); border-color: var(--accent-2); }
+.checkbox.checked svg { opacity: 1; }
+.checkbox svg { opacity: 0; transition: opacity 0.15s; }
+
+.streak-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 6px; border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 15%, transparent);
+  color: var(--accent); font-size: 11px; font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.stat-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: 12px; font-family: var(--font-mono);
+}
+
+/* XP bar — classic RPG */
+.xp-bar {
+  height: 8px; border-radius: 999px; overflow: hidden;
+  background: var(--line); position: relative;
+}
+.xp-bar .fill {
+  height: 100%; border-radius: 999px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(90deg, var(--hue, var(--accent)) 0%, color-mix(in oklch, var(--hue, var(--accent)) 75%, white) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+}
+.xp-bar.thick { height: 14px; }
+
+/* Sidebar */
+.sidebar-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 6px;
+  cursor: pointer; color: var(--ink-2); font-size: 13px;
+  transition: background 0.12s;
+  white-space: nowrap;
+  user-select: none;
+}
+.sidebar-item:hover { background: var(--surface-2); }
+.sidebar-item.active { background: var(--surface-2); color: var(--ink); font-weight: 500; }
+.sidebar-section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--ink-4);
+  padding: 4px 10px; margin-top: 12px;
+}
+
+/* Focus */
+*:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* Data tooltips */
+.tooltip {
+  position: absolute; z-index: 100;
+  background: var(--ink); color: var(--bg);
+  padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; white-space: nowrap;
+  pointer-events: none; box-shadow: var(--shadow-2);
+}
+
+/* Login / character creation */
+.avatar-swatch {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; color: var(--ink-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.avatar-swatch:hover { background: var(--surface-2); color: var(--ink); }
+.avatar-swatch.active {
+  background: var(--ink); color: var(--bg);
+  border-color: var(--ink);
+}
+.class-btn {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer;
+  transition: all 0.12s; color: var(--ink);
+  font-family: inherit;
+}
+.class-btn:hover { background: var(--surface-2); }
+.class-btn.active {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Menu items (dropdown) */
+.menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 12px;
+  background: transparent; border: 0;
+  color: var(--ink); font-size: 13px; text-align: left;
+  font-family: inherit; cursor: pointer;
+  transition: background 0.12s;
+}
+.menu-item:hover { background: var(--surface-2); }
+.menu-item.danger { color: var(--forca); }
+.menu-item.danger:hover { background: color-mix(in oklch, var(--forca) 10%, var(--surface-2)); }
