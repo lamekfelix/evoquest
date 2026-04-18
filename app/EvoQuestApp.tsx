@@ -2061,7 +2061,7 @@ function ParaScreen({ state, dispatch, para }) {
 
 function ProjectCard({ p, areas, onClick, onDelete, onStatusChange }) {
   const area = areas.find(a => a.id === p.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
-  const st = STATUS_CFG[p.status || 'inbox'];
+  const st = STATUS_CFG[p.status || 'inbox'] || { label: 'Inbox', color: 'var(--ink-3)' };
   const subtasks = p.subtasks || [];
   const doneSubs = subtasks.filter(t => t.done).length;
   const progress = subtasks.length ? doneSubs / subtasks.length : (p.progress || 0);
