@@ -349,6 +349,7 @@ function foodMacros(foodId, qty) {
 }
 
 function mealTotals(meal) {
+  if (!meal || !meal.items) return { kcal: 0, p: 0, c: 0, f: 0 };
   return meal.items.reduce((acc, it) => {
     const m = foodMacros(it.foodId, it.qty);
     acc.kcal += m.kcal; acc.p += m.p; acc.c += m.c; acc.f += m.f;
@@ -3030,6 +3031,7 @@ function WorkoutScreen({ state, dispatch }) {
   const [libQuery, setLibQuery] = React.useState('');
 
   const workout = state.workouts.find(w => w.id === selectedWId);
+  if (!workout) return <div style={{padding:40}}>Nenhum treino cadastrado ainda.</div>;
   const totalSets = workout.exercises.reduce((a, e) => a + e.sets, 0);
   const doneCount = workout.exercises.filter(e => e.done).length;
   const progress = workout.exercises.length ? doneCount / workout.exercises.length : 0;
