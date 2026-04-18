@@ -3609,6 +3609,7 @@ function DietScreen({ state, dispatch }) {
 
         {/* Center: meal detail */}
         <div className="card" style={{ padding: 24 }}>
+          {!meal ? <div style={{ padding: 24, color: 'var(--ink-3)' }}>Nenhuma refeição cadastrada ainda.</div> : <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
@@ -3701,6 +3702,7 @@ function DietScreen({ state, dispatch }) {
           >
             <Icon name="plus" size={12} /> Adicionar alimento
           </button>
+          </>}
         </div>
 
         {/* Right: day summary */}
