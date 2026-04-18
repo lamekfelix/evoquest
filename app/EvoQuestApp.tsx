@@ -2702,8 +2702,8 @@ function ChartsScreen({ state, tweaks }) {
   const totals = ATTRIBUTES.map(a => ({
     attr: a,
     curr: state.attrXp[a.id],
-    delta: data[data.length - 1][a.id] - data[0][a.id],
-    series: data.map(d => d[a.id]),
+    delta: data.length === 0 ? 0 : data[data.length - 1][a.id] - data[0][a.id],
+    series: data.length === 0 ? [] : data.map(d => d[a.id]),
   }));
 
   return (
@@ -3023,7 +3023,7 @@ function GoalsScreen({ state }) {
 // screens-workout.jsx — Workout builder (Funcional + Musculação)
 
 function WorkoutScreen({ state, dispatch }) {
-  const [selectedWId, setSelectedWId] = React.useState(state.workouts[0].id);
+  const [selectedWId, setSelectedWId] = React.useState(state.workouts[0]?.id || null);
   const [filter, setFilter] = React.useState('all'); // all | musc | func | cardio | mob
   const [showLibrary, setShowLibrary] = React.useState(false);
   const [libGroup, setLibGroup] = React.useState('all');
@@ -3470,7 +3470,7 @@ function ExerciseLibraryModal({ onClose, onAdd, libGroup, setLibGroup, libQuery,
 // screens-diet.jsx — Diet builder with macros, meals, water
 
 function DietScreen({ state, dispatch }) {
-  const [selectedMId, setSelectedMId] = React.useState(state.meals[0].id);
+  const [selectedMId, setSelectedMId] = React.useState(state.meals[0]?.id || null);
   const [showFoodLib, setShowFoodLib] = React.useState(false);
   const [libCat, setLibCat] = React.useState('all');
   const [libQuery, setLibQuery] = React.useState('');
