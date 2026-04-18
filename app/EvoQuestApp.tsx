@@ -1,0 +1,5019 @@
+'use client'
+// @ts-nocheck
+import React from 'react';
+
+// ═══ state.jsx ═══
+// state.jsx — seed data + state management for EvoQuest
+
+const ATTRIBUTES = [
+  { id: 'forca',        name: 'Força',        en: 'Strength',   abbr: 'FOR', hue: 'var(--forca)',        icon: '◆' },
+  { id: 'inteligencia', name: 'Inteligência', en: 'Intellect',  abbr: 'INT', hue: 'var(--inteligencia)', icon: '◇' },
+  { id: 'sabedoria',    name: 'Sabedoria',    en: 'Wisdom',     abbr: 'SAB', hue: 'var(--sabedoria)',    icon: '◈' },
+  { id: 'disciplina',   name: 'Disciplina',   en: 'Discipline', abbr: 'DIS', hue: 'var(--disciplina)',   icon: '◉' },
+  { id: 'foco',         name: 'Foco',         en: 'Focus',      abbr: 'FOC', hue: 'var(--foco)',         icon: '◎' },
+  { id: 'vitalidade',   name: 'Vitalidade',   en: 'Vitality',   abbr: 'VIT', hue: 'var(--vitalidade)',   icon: '◐' },
+  { id: 'resiliencia',  name: 'Resiliência',  en: 'Resilience', abbr: 'RES', hue: 'var(--resiliencia)',  icon: '◑' },
+  { id: 'equilibrio',   name: 'Equilíbrio',   en: 'Balance',    abbr: 'EQU', hue: 'var(--equilibrio)',   icon: '◒' },
+];
+
+// XP required to reach level n (from 1): 100 * n * 1.35^(n-1), capped compounding
+function xpForLevel(level) {
+  return Math.round(100 * level * Math.pow(1.28, level - 1));
+}
+
+// total XP accumulated → { level, xpInLevel, xpToNext, progress }
+function deriveLevel(totalXp) {
+  let level = 1, remaining = totalXp;
+  while (true) {
+    const need = xpForLevel(level);
+    if (remaining < need) return { level, xpInLevel: remaining, xpToNext: need, progress: remaining / need };
+    remaining -= need;
+    level++;
+    if (level > 99) return { level: 99, xpInLevel: xpForLevel(99), xpToNext: xpForLevel(99), progress: 1 };
+  }
+}
+
+// Fresh start — user begins with no XP and no habits/projects/quests
+const SEED_ATTR_XP = {
+  forca: 0, inteligencia: 0, sabedoria: 0, disciplina: 0,
+  foco: 0, vitalidade: 0, resiliencia: 0, equilibrio: 0,
+};
+
+const HABITS_SEED = [];
+
+// PARA — empty at first run. User creates these.
+const PROJECTS_SEED = [];
+const AREAS_SEED = [];
+const RESOURCES_SEED = [];
+const ARCHIVES_SEED = [];
+
+// Today + agenda
+const today = new Date('2026-04-17'); // fixed "today" for demo
+
+function dateISO(d) { return d.toISOString().slice(0,10); }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+
+const AGENDA_SEED = [];
+const QUESTS_SEED = [];
+
+// Achievements are a definition, not user data. They stay — unlock state is derived from stats.
+const ACHIEVEMENTS_SEED = [
+  { id: 'ac1', name: 'Primeiros Passos',   desc: 'Complete seu primeiro hábito',          unlocked: false },
+  { id: 'ac2', name: 'Chama Eterna',        desc: 'Streak de 30 dias em qualquer hábito', unlocked: false },
+  { id: 'ac3', name: 'Arquiteto',           desc: 'Crie seu primeiro projeto PARA',       unlocked: false },
+  { id: 'ac4', name: 'Foco de Monge',       desc: 'Nível 10 em Disciplina',               unlocked: false },
+  { id: 'ac5', name: 'Escolar Dedicado',    desc: '50 livros lidos',                      unlocked: false },
+  { id: 'ac6', name: 'Maratona Completa',   desc: 'Completar uma maratona oficial',       unlocked: false },
+  { id: 'ac7', name: 'Equilíbrio Pleno',    desc: 'Todos atributos acima de nível 15',    unlocked: false },
+  { id: 'ac8', name: 'Alquimista',          desc: 'Transforme 5 áreas em 1 ano',          unlocked: false },
+];
+
+// generate 90 days of XP history for charts
+function generateXpHistory() {
+  const history = [];
+  const start = new Date('2026-01-17');
+  const state = { forca: 0, inteligencia: 0, sabedoria: 0, disciplina: 0, foco: 0, vitalidade: 0, resiliencia: 0, equilibrio: 0 };
+  for (let i = 0; i < 91; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i);
+    // simulate realistic growth w/ noise
+    state.forca       += 20 + Math.random() * 25 * (0.5 + Math.sin(i/12));
+    state.inteligencia+= 30 + Math.random() * 30;
+    state.sabedoria   += 25 + Math.random() * 20;
+    state.disciplina  += 28 + Math.random() * 25;
+    state.foco        += 15 + Math.random() * 20;
+    state.vitalidade  += 22 + Math.random() * 25 * (0.7 + Math.cos(i/10));
+    state.resiliencia += 12 + Math.random() * 18;
+    state.equilibrio  += 10 + Math.random() * 15;
+    history.push({ date: dateISO(d), ...state });
+  }
+  return history;
+}
+
+// XP history is accumulated from real usage now. Empty at start.
+const XP_HISTORY = [];
+function _unused_gen_xp() { return generateXpHistory(); }
+
+// habit completion history (for heatmap) — 90 days × 8 habits
+function generateHabitHistory() {
+  const map = {};
+  HABITS_SEED.forEach(h => {
+    map[h.id] = [];
+    for (let i = 89; i >= 0; i--) {
+      const d = addDays(today, -i);
+      const day = d.getDay();
+      if (h.freq === 'weekday' && (day === 0 || day === 6)) { map[h.id].push(null); continue; }
+      const base = 0.6 + (h.streak / 60);
+      map[h.id].push(Math.random() < base ? 1 : 0);
+    }
+  });
+  return map;
+}
+// Habit completion heatmap — empty at start, fills as user checks off habits.
+const HABIT_HISTORY = {};
+function _unused_gen_habit() { return generateHabitHistory(); }
+
+// =========================
+// WORKOUT PLANS
+// =========================
+const MUSCLE_GROUPS = [
+  { id: 'peito',   name: 'Peito',     hue: 'var(--forca)' },
+  { id: 'costas',  name: 'Costas',    hue: 'var(--disciplina)' },
+  { id: 'ombro',   name: 'Ombros',    hue: 'var(--resiliencia)' },
+  { id: 'biceps',  name: 'Bíceps',    hue: 'var(--forca)' },
+  { id: 'triceps', name: 'Tríceps',   hue: 'var(--resiliencia)' },
+  { id: 'perna',   name: 'Pernas',    hue: 'var(--vitalidade)' },
+  { id: 'core',    name: 'Core',      hue: 'var(--equilibrio)' },
+  { id: 'cardio',  name: 'Cardio',    hue: 'var(--foco)' },
+  { id: 'mob',     name: 'Mobilidade',hue: 'var(--sabedoria)' },
+];
+
+const EXERCISE_LIB = [
+  // Peito
+  { id: 'e1',  name: 'Supino reto com barra',     group: 'peito',   kind: 'musc' },
+  { id: 'e2',  name: 'Supino inclinado halteres', group: 'peito',   kind: 'musc' },
+  { id: 'e3',  name: 'Crucifixo polia',           group: 'peito',   kind: 'musc' },
+  { id: 'e4',  name: 'Flexão de braço',           group: 'peito',   kind: 'func' },
+  // Costas
+  { id: 'e5',  name: 'Barra fixa',                group: 'costas',  kind: 'func' },
+  { id: 'e6',  name: 'Remada curvada',            group: 'costas',  kind: 'musc' },
+  { id: 'e7',  name: 'Puxada alta',               group: 'costas',  kind: 'musc' },
+  { id: 'e8',  name: 'Remada unilateral',         group: 'costas',  kind: 'musc' },
+  // Ombro
+  { id: 'e9',  name: 'Desenvolvimento militar',   group: 'ombro',   kind: 'musc' },
+  { id: 'e10', name: 'Elevação lateral',          group: 'ombro',   kind: 'musc' },
+  { id: 'e11', name: 'Face pull',                 group: 'ombro',   kind: 'musc' },
+  // Bíceps & Tríceps
+  { id: 'e12', name: 'Rosca direta',              group: 'biceps',  kind: 'musc' },
+  { id: 'e13', name: 'Rosca alternada',           group: 'biceps',  kind: 'musc' },
+  { id: 'e14', name: 'Tríceps corda',             group: 'triceps', kind: 'musc' },
+  { id: 'e15', name: 'Tríceps francês',           group: 'triceps', kind: 'musc' },
+  // Pernas
+  { id: 'e16', name: 'Agachamento livre',         group: 'perna',   kind: 'musc' },
+  { id: 'e17', name: 'Leg press',                 group: 'perna',   kind: 'musc' },
+  { id: 'e18', name: 'Stiff',                     group: 'perna',   kind: 'musc' },
+  { id: 'e19', name: 'Cadeira extensora',         group: 'perna',   kind: 'musc' },
+  { id: 'e20', name: 'Panturrilha em pé',         group: 'perna',   kind: 'musc' },
+  { id: 'e21', name: 'Agachamento búlgaro',       group: 'perna',   kind: 'func' },
+  { id: 'e22', name: 'Afundo com halter',         group: 'perna',   kind: 'func' },
+  // Core
+  { id: 'e23', name: 'Prancha frontal',           group: 'core',    kind: 'func' },
+  { id: 'e24', name: 'Abdominal infra',           group: 'core',    kind: 'func' },
+  { id: 'e25', name: 'Russian twist',             group: 'core',    kind: 'func' },
+  { id: 'e26', name: 'Dead bug',                  group: 'core',    kind: 'func' },
+  // Funcional
+  { id: 'e27', name: 'Burpee',                    group: 'cardio',  kind: 'func' },
+  { id: 'e28', name: 'Kettlebell swing',          group: 'perna',   kind: 'func' },
+  { id: 'e29', name: 'Box jump',                  group: 'perna',   kind: 'func' },
+  { id: 'e30', name: 'Farmer walk',               group: 'core',    kind: 'func' },
+  { id: 'e31', name: 'Thruster',                  group: 'perna',   kind: 'func' },
+  // Cardio & Mob
+  { id: 'e32', name: 'Corrida 5km',               group: 'cardio',  kind: 'cardio' },
+  { id: 'e33', name: 'Bike 30min',                group: 'cardio',  kind: 'cardio' },
+  { id: 'e34', name: 'HIIT 20min',                group: 'cardio',  kind: 'cardio' },
+  { id: 'e35', name: 'Alongamento global',        group: 'mob',     kind: 'mob' },
+  { id: 'e36', name: 'Yoga flow',                 group: 'mob',     kind: 'mob' },
+];
+
+// Workout split — empty at start. User builds their own routine.
+const WORKOUT_SPLIT_SEED = [];
+const WORKOUT_SPLIT_DEMO = [
+  {
+    id: 'w1', day: 'Segunda', label: 'A — Push (Peito / Ombro / Tríceps)', kind: 'musc', durationMin: 60,
+    exercises: [
+      { exId: 'e1',  sets: 4, reps: '8-10', load: '60kg',  rest: 90,  done: true },
+      { exId: 'e2',  sets: 3, reps: '10-12',load: '22kg',  rest: 75,  done: true },
+      { exId: 'e3',  sets: 3, reps: '12-15',load: '15kg',  rest: 60,  done: false },
+      { exId: 'e9',  sets: 4, reps: '8-10', load: '35kg',  rest: 90,  done: false },
+      { exId: 'e10', sets: 3, reps: '12-15',load: '10kg',  rest: 45,  done: false },
+      { exId: 'e14', sets: 3, reps: '12-15',load: '25kg',  rest: 45,  done: false },
+    ],
+  },
+  {
+    id: 'w2', day: 'Terça', label: 'B — Pull (Costas / Bíceps)', kind: 'musc', durationMin: 55,
+    exercises: [
+      { exId: 'e5',  sets: 4, reps: '6-8',  load: 'Peso',  rest: 90,  done: true },
+      { exId: 'e6',  sets: 4, reps: '8-10', load: '50kg',  rest: 90,  done: true },
+      { exId: 'e7',  sets: 3, reps: '10-12',load: '55kg',  rest: 75,  done: true },
+      { exId: 'e8',  sets: 3, reps: '10-12',load: '22kg',  rest: 60,  done: true },
+      { exId: 'e12', sets: 3, reps: '10-12',load: '14kg',  rest: 60,  done: true },
+      { exId: 'e13', sets: 3, reps: '10-12',load: '12kg',  rest: 45,  done: true },
+    ],
+  },
+  {
+    id: 'w3', day: 'Quarta', label: 'C — Legs (Pernas / Core)', kind: 'musc', durationMin: 70,
+    exercises: [
+      { exId: 'e16', sets: 5, reps: '5-8',  load: '80kg',  rest: 120, done: true },
+      { exId: 'e17', sets: 4, reps: '10-12',load: '180kg', rest: 90,  done: true },
+      { exId: 'e18', sets: 4, reps: '8-10', load: '60kg',  rest: 90,  done: false },
+      { exId: 'e19', sets: 3, reps: '12-15',load: '45kg',  rest: 60,  done: false },
+      { exId: 'e20', sets: 4, reps: '15-20',load: '70kg',  rest: 45,  done: false },
+      { exId: 'e23', sets: 3, reps: '60s',  load: '—',     rest: 45,  done: false },
+    ],
+  },
+  {
+    id: 'w4', day: 'Quinta', label: 'Funcional — Full Body', kind: 'func', durationMin: 45,
+    exercises: [
+      { exId: 'e21', sets: 3, reps: '12 cada',load: '14kg',rest: 60,  done: false },
+      { exId: 'e27', sets: 4, reps: '15',   load: '—',     rest: 60,  done: false },
+      { exId: 'e28', sets: 4, reps: '20',   load: '20kg',  rest: 45,  done: false },
+      { exId: 'e30', sets: 3, reps: '40m',  load: '24kg',  rest: 60,  done: false },
+      { exId: 'e25', sets: 3, reps: '30',   load: '8kg',   rest: 30,  done: false },
+    ],
+  },
+  {
+    id: 'w5', day: 'Sexta', label: 'A — Push (repeat)', kind: 'musc', durationMin: 55,
+    exercises: [
+      { exId: 'e2',  sets: 4, reps: '8-10', load: '24kg',  rest: 90,  done: false },
+      { exId: 'e4',  sets: 3, reps: 'AMRAP',load: '—',     rest: 60,  done: false },
+      { exId: 'e9',  sets: 3, reps: '10-12',load: '32kg',  rest: 75,  done: false },
+      { exId: 'e11', sets: 3, reps: '12-15',load: '18kg',  rest: 45,  done: false },
+      { exId: 'e15', sets: 3, reps: '10-12',load: '14kg',  rest: 45,  done: false },
+    ],
+  },
+  {
+    id: 'w6', day: 'Sábado', label: 'Cardio + Mobilidade', kind: 'cardio', durationMin: 60,
+    exercises: [
+      { exId: 'e32', sets: 1, reps: '5km',  load: '28:00', rest: 0,  done: false },
+      { exId: 'e34', sets: 1, reps: '20min',load: 'Tabata',rest: 0,  done: false },
+      { exId: 'e35', sets: 1, reps: '15min',load: '—',     rest: 0,  done: false },
+    ],
+  },
+  {
+    id: 'w7', day: 'Domingo', label: 'Descanso ativo', kind: 'mob', durationMin: 30,
+    exercises: [
+      { exId: 'e36', sets: 1, reps: '30min',load: '—',     rest: 0,  done: false },
+    ],
+  },
+];
+
+// =========================
+// DIET PLAN
+// =========================
+const FOOD_LIB = [
+  // Proteínas
+  { id: 'f1',  name: 'Frango grelhado',       cat: 'proteina', base: 100, unit: 'g',  kcal: 165, p: 31, c: 0,  f: 3.6 },
+  { id: 'f2',  name: 'Filé mignon',           cat: 'proteina', base: 100, unit: 'g',  kcal: 217, p: 26, c: 0,  f: 12  },
+  { id: 'f3',  name: 'Salmão',                cat: 'proteina', base: 100, unit: 'g',  kcal: 208, p: 20, c: 0,  f: 13  },
+  { id: 'f4',  name: 'Tilápia',               cat: 'proteina', base: 100, unit: 'g',  kcal: 129, p: 26, c: 0,  f: 3   },
+  { id: 'f5',  name: 'Ovo inteiro',           cat: 'proteina', base: 1,   unit: 'un', kcal: 78,  p: 6.3,c: 0.6,f: 5.3 },
+  { id: 'f6',  name: 'Whey protein',          cat: 'proteina', base: 30,  unit: 'g',  kcal: 120, p: 24, c: 3,  f: 1.5 },
+  { id: 'f7',  name: 'Iogurte grego',         cat: 'proteina', base: 170, unit: 'g',  kcal: 100, p: 17, c: 6,  f: 0   },
+  // Carbos
+  { id: 'f8',  name: 'Arroz integral',        cat: 'carbo',    base: 100, unit: 'g',  kcal: 124, p: 2.6,c: 26, f: 1   },
+  { id: 'f9',  name: 'Arroz branco',          cat: 'carbo',    base: 100, unit: 'g',  kcal: 130, p: 2.7,c: 28, f: 0.3 },
+  { id: 'f10', name: 'Batata doce',           cat: 'carbo',    base: 100, unit: 'g',  kcal: 86,  p: 1.6,c: 20, f: 0.1 },
+  { id: 'f11', name: 'Aveia',                 cat: 'carbo',    base: 40,  unit: 'g',  kcal: 150, p: 5,  c: 27, f: 3   },
+  { id: 'f12', name: 'Pão integral',          cat: 'carbo',    base: 1,   unit: 'fat',kcal: 80,  p: 4,  c: 15, f: 1   },
+  { id: 'f13', name: 'Banana',                cat: 'carbo',    base: 1,   unit: 'un', kcal: 105, p: 1.3,c: 27, f: 0.4 },
+  // Gorduras
+  { id: 'f14', name: 'Abacate',               cat: 'gordura',  base: 100, unit: 'g',  kcal: 160, p: 2,  c: 9,  f: 15  },
+  { id: 'f15', name: 'Azeite extra virgem',   cat: 'gordura',  base: 1,   unit: 'cs', kcal: 120, p: 0,  c: 0,  f: 14  },
+  { id: 'f16', name: 'Castanhas mix',         cat: 'gordura',  base: 30,  unit: 'g',  kcal: 180, p: 5,  c: 6,  f: 16  },
+  { id: 'f17', name: 'Pasta de amendoim',     cat: 'gordura',  base: 1,   unit: 'cs', kcal: 94,  p: 4,  c: 3,  f: 8   },
+  // Vegetais
+  { id: 'f18', name: 'Brócolis',              cat: 'veg',      base: 100, unit: 'g',  kcal: 34,  p: 2.8,c: 7,  f: 0.4 },
+  { id: 'f19', name: 'Salada verde',          cat: 'veg',      base: 100, unit: 'g',  kcal: 20,  p: 1.5,c: 3,  f: 0.2 },
+  { id: 'f20', name: 'Tomate',                cat: 'veg',      base: 100, unit: 'g',  kcal: 18,  p: 0.9,c: 3.9,f: 0.2 },
+  { id: 'f21', name: 'Mirtilos',              cat: 'veg',      base: 100, unit: 'g',  kcal: 57,  p: 0.7,c: 14, f: 0.3 },
+];
+
+// User's diet goals
+const DIET_GOALS = {
+  kcal: 2400,
+  p: 180,
+  c: 260,
+  f: 70,
+  water: 3000,
+  waterToday: 0,
+};
+
+// Meals — empty at start.
+const MEALS_SEED = [];
+const MEALS_DEMO = [
+  {
+    id: 'm1', name: 'Café da manhã', time: '07:30', icon: '◐',
+    items: [
+      { foodId: 'f5',  qty: 3,   note: 'mexidos' },
+      { foodId: 'f11', qty: 40,  note: 'com leite' },
+      { foodId: 'f13', qty: 1,   note: '' },
+      { foodId: 'f17', qty: 1,   note: '' },
+    ],
+  },
+  {
+    id: 'm2', name: 'Lanche manhã', time: '10:30', icon: '◇',
+    items: [
+      { foodId: 'f6',  qty: 30,  note: 'pós-treino' },
+      { foodId: 'f13', qty: 1,   note: '' },
+    ],
+  },
+  {
+    id: 'm3', name: 'Almoço', time: '12:30', icon: '◆',
+    items: [
+      { foodId: 'f1',  qty: 180, note: 'peito' },
+      { foodId: 'f8',  qty: 120, note: '' },
+      { foodId: 'f18', qty: 150, note: 'vapor' },
+      { foodId: 'f19', qty: 80,  note: '' },
+      { foodId: 'f15', qty: 1,   note: 'na salada' },
+    ],
+  },
+  {
+    id: 'm4', name: 'Lanche tarde', time: '16:00', icon: '◈',
+    items: [
+      { foodId: 'f7',  qty: 170, note: '' },
+      { foodId: 'f16', qty: 30,  note: '' },
+      { foodId: 'f21', qty: 80,  note: '' },
+    ],
+  },
+  {
+    id: 'm5', name: 'Jantar', time: '19:30', icon: '◒',
+    items: [
+      { foodId: 'f3',  qty: 150, note: 'grelhado' },
+      { foodId: 'f10', qty: 200, note: 'assada' },
+      { foodId: 'f18', qty: 100, note: '' },
+      { foodId: 'f14', qty: 50,  note: '1/4 de unidade' },
+    ],
+  },
+];
+
+// compute a food item's macros from qty
+function foodMacros(foodId, qty) {
+  const f = FOOD_LIB.find(x => x.id === foodId);
+  if (!f) return { kcal: 0, p: 0, c: 0, f: 0 };
+  const factor = qty / f.base;
+  return {
+    kcal: Math.round(f.kcal * factor),
+    p:    +(f.p * factor).toFixed(1),
+    c:    +(f.c * factor).toFixed(1),
+    f:    +(f.f * factor).toFixed(1),
+  };
+}
+
+function mealTotals(meal) {
+  return meal.items.reduce((acc, it) => {
+    const m = foodMacros(it.foodId, it.qty);
+    acc.kcal += m.kcal; acc.p += m.p; acc.c += m.c; acc.f += m.f;
+    return acc;
+  }, { kcal: 0, p: 0, c: 0, f: 0 });
+}
+
+// ═══ components.jsx ═══
+// components.jsx — shared UI primitives
+
+// ────────────────────────────────────────────────────────────
+// Icon
+// ────────────────────────────────────────────────────────────
+function Icon({ name, size = 14, stroke = 1.5 }) {
+  const props = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: stroke, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  const paths = {
+    home:   <><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></>,
+    cal:    <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></>,
+    week:   <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 11h18M9 5v16"/></>,
+    month:  <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M3 13h18M3 17h18M9 5v16M15 5v16"/></>,
+    target: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></>,
+    habit:  <><path d="M20 6L9 17l-5-5"/></>,
+    char:   <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></>,
+    chart:  <><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></>,
+    user:   <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></>,
+    folder: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></>,
+    archive:<><rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></>,
+    plus:   <><path d="M12 5v14M5 12h14"/></>,
+    search: <><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></>,
+    flame:  <><path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1 .5-2 1-3 1 2 3 2 3-2 0-1 0-2 0-3z"/></>,
+    trophy: <><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM7 7H4a2 2 0 0 0 2 4M17 7h3a2 2 0 0 1-2 4"/></>,
+    sparkle:<><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></>,
+    clock:  <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    arrow:  <><path d="M5 12h14M13 6l6 6-6 6"/></>,
+    chev:   <><path d="M9 6l6 6-6 6"/></>,
+    check:  <><path d="M5 12l4 4 10-10"/></>,
+    dots:   <><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></>,
+    settings:<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+    moon:   <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></>,
+    sun:    <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></>,
+    zap:    <><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></>,
+    dumbbell:<><path d="M6.5 6.5l11 11"/><path d="M21 21l-1-1M3 3l1 1M18 22l4-4-3-3-4 4 3 3zM2 18l4-4 3 3-4 4-3-3z"/><path d="M9 11l4-4M13 17l4-4"/></>,
+    apple:  <><path d="M12 7c-1-2-3-3-5-3 0 3 2 5 5 5M12 7c1-2 3-3 5-3 0 3-2 5-5 5M12 20c-3 0-6-3-6-7s2-6 6-6 6 2 6 6-3 7-6 7z"/></>,
+    water:  <><path d="M12 3c4 5 7 9 7 13a7 7 0 0 1-14 0c0-4 3-8 7-13z"/></>,
+    fire:   <><path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1 .5-2 1-3 1 2 3 2 3-2 0-1 0-2 0-3z"/></>,
+    x:      <><path d="M6 6l12 12M18 6l-12 12"/></>,
+    edit:   <><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></>,
+    trash:  <><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14M10 11v6M14 11v6"/></>,
+    globe:  <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></>,
+    logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></>,
+  };
+  return <svg {...props}>{paths[name] || paths.home}</svg>;
+}
+
+// ────────────────────────────────────────────────────────────
+// XP Bar (classic RPG)
+// ────────────────────────────────────────────────────────────
+function XPBar({ attr, value, max, thick = false, showLabel = true }) {
+  const attrMeta = ATTRIBUTES.find(a => a.id === attr);
+  const pct = Math.min(100, (value / max) * 100);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+      {showLabel && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--ink-2)', fontWeight: 500 }}>
+            <span style={{ color: attrMeta?.hue, fontSize: 12 }}>{attrMeta?.icon}</span>
+            {attrMeta?.name}
+          </span>
+          <span className="mono" style={{ color: 'var(--ink-3)' }}>{value}/{max}</span>
+        </div>
+      )}
+      <div className={`xp-bar ${thick ? 'thick' : ''}`}>
+        <div className="fill" style={{ width: `${pct}%`, '--hue': attrMeta?.hue }} />
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Checkbox
+// ────────────────────────────────────────────────────────────
+function Checkbox({ checked, onChange, size = 18 }) {
+  return (
+    <div
+      className={`checkbox ${checked ? 'checked' : ''}`}
+      onClick={(e) => { e.stopPropagation(); onChange && onChange(!checked); }}
+      style={{ width: size, height: size }}
+    >
+      <svg width={size * 0.66} height={size * 0.66} viewBox="0 0 24 24" fill="none" stroke="var(--bg)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12l4 4 10-10"/>
+      </svg>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Level Badge
+// ────────────────────────────────────────────────────────────
+function LevelBadge({ level, size = 32, hue }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: `linear-gradient(135deg, ${hue || 'var(--accent)'}, color-mix(in oklch, ${hue || 'var(--accent)'} 70%, black))`,
+      color: '#fff', fontFamily: 'var(--font-serif)', fontSize: size * 0.48,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontWeight: 500, letterSpacing: '-0.02em',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.25)',
+      flexShrink: 0,
+    }}>{level}</div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Streak badge
+// ────────────────────────────────────────────────────────────
+function Streak({ n }) {
+  if (!n) return null;
+  return (
+    <span className="streak-badge" title={`${n} dias seguidos`}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2s5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 1.5-4 1 2 2.5 2 2.5-1 0-2 0-3 1-5z"/></svg>
+      {n}
+    </span>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Sparkline
+// ────────────────────────────────────────────────────────────
+function Sparkline({ data, color = 'var(--accent)', width = 80, height = 24, fill = true }) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => [
+    (i / (data.length - 1)) * width,
+    height - ((v - min) / range) * height,
+  ]);
+  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const fillPath = `${path} L${width},${height} L0,${height} Z`;
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      {fill && <path d={fillPath} fill={color} opacity="0.12" />}
+      <path d={path} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Empty State
+// ────────────────────────────────────────────────────────────
+function EmptyState({ icon = 'sparkle', title, hint, action, compact = false }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: compact ? '18px 12px' : '32px 16px',
+      textAlign: 'center', color: 'var(--ink-3)', gap: 6,
+    }}>
+      <div style={{
+        width: 40, height: 40, borderRadius: '50%',
+        background: 'color-mix(in oklch, var(--ink) 4%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'var(--ink-3)', marginBottom: 2,
+      }}>
+        <Icon name={icon} size={18} />
+      </div>
+      <div className="serif" style={{ fontSize: 16, color: 'var(--ink-2)', lineHeight: 1.2 }}>{title}</div>
+      {hint && <div style={{ fontSize: 12, maxWidth: 280, lineHeight: 1.4 }}>{hint}</div>}
+      {action && (
+        <button onClick={action.onClick} className="btn" style={{
+          marginTop: 6, fontSize: 12, padding: '6px 12px',
+          background: 'var(--surface)', border: '1px solid var(--line)',
+        }}>
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ═══ ios-frame.jsx ═══
+
+// iOS.jsx — Simplified iOS 26 (Liquid Glass) device frame
+// Based on the iOS 26 UI Kit + Figma status bar spec. No assets, no deps.
+// Exports: IOSDevice, IOSStatusBar, IOSNavBar, IOSGlassPill, IOSList, IOSListRow, IOSKeyboard
+
+// ─────────────────────────────────────────────────────────────
+// Status bar
+// ─────────────────────────────────────────────────────────────
+function IOSStatusBar({ dark = false, time = '9:41' }) {
+  const c = dark ? '#fff' : '#000';
+  return (
+    <div style={{
+      display: 'flex', gap: 154, alignItems: 'center', justifyContent: 'center',
+      padding: '21px 24px 19px', boxSizing: 'border-box',
+      position: 'relative', zIndex: 20, width: '100%',
+    }}>
+      <div style={{ flex: 1, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 1.5 }}>
+        <span style={{
+          fontFamily: '-apple-system, "SF Pro", system-ui', fontWeight: 590,
+          fontSize: 17, lineHeight: '22px', color: c,
+        }}>{time}</span>
+      </div>
+      <div style={{ flex: 1, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, paddingTop: 1, paddingRight: 1 }}>
+        <svg width="19" height="12" viewBox="0 0 19 12">
+          <rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7" fill={c}/>
+          <rect x="4.8" y="5" width="3.2" height="7" rx="0.7" fill={c}/>
+          <rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7" fill={c}/>
+          <rect x="14.4" y="0" width="3.2" height="12" rx="0.7" fill={c}/>
+        </svg>
+        <svg width="17" height="12" viewBox="0 0 17 12">
+          <path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill={c}/>
+          <path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1C6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z" fill={c}/>
+          <circle cx="8.5" cy="10.5" r="1.5" fill={c}/>
+        </svg>
+        <svg width="27" height="13" viewBox="0 0 27 13">
+          <rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke={c} strokeOpacity="0.35" fill="none"/>
+          <rect x="2" y="2" width="20" height="9" rx="2" fill={c}/>
+          <path d="M25 4.5V8.5C25.8 8.2 26.5 7.2 26.5 6.5C26.5 5.8 25.8 4.8 25 4.5Z" fill={c} fillOpacity="0.4"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Liquid glass pill — blur + tint + shine
+// ─────────────────────────────────────────────────────────────
+function IOSGlassPill({ children, dark = false, style = {} }) {
+  return (
+    <div style={{
+      height: 44, minWidth: 44, borderRadius: 9999,
+      position: 'relative', overflow: 'hidden',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: dark
+        ? '0 2px 6px rgba(0,0,0,0.35), 0 6px 16px rgba(0,0,0,0.2)'
+        : '0 1px 3px rgba(0,0,0,0.07), 0 3px 10px rgba(0,0,0,0.06)',
+      ...style,
+    }}>
+      {/* blur + tint */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 9999,
+        backdropFilter: 'blur(12px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+        background: dark ? 'rgba(120,120,128,0.28)' : 'rgba(255,255,255,0.5)',
+      }} />
+      {/* shine */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 9999,
+        boxShadow: dark
+          ? 'inset 1.5px 1.5px 1px rgba(255,255,255,0.15), inset -1px -1px 1px rgba(255,255,255,0.08)'
+          : 'inset 1.5px 1.5px 1px rgba(255,255,255,0.7), inset -1px -1px 1px rgba(255,255,255,0.4)',
+        border: dark ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid rgba(0,0,0,0.06)',
+      }} />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', padding: '0 4px' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Navigation bar — glass pills + large title
+// ─────────────────────────────────────────────────────────────
+function IOSNavBar({ title = 'Title', dark = false, trailingIcon = true }) {
+  const muted = dark ? 'rgba(255,255,255,0.6)' : '#404040';
+  const text = dark ? '#fff' : '#000';
+  const pillIcon = (content) => (
+    <IOSGlassPill dark={dark}>
+      <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {content}
+      </div>
+    </IOSGlassPill>
+  );
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 10,
+      paddingTop: 62, paddingBottom: 10, position: 'relative', zIndex: 5,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px',
+      }}>
+        {/* back chevron */}
+        {pillIcon(
+          <svg width="12" height="20" viewBox="0 0 12 20" fill="none" style={{ marginLeft: -1 }}>
+            <path d="M10 2L2 10l8 8" stroke={muted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+        {/* trailing ellipsis */}
+        {trailingIcon && pillIcon(
+          <svg width="22" height="6" viewBox="0 0 22 6">
+            <circle cx="3" cy="3" r="2.5" fill={muted}/>
+            <circle cx="11" cy="3" r="2.5" fill={muted}/>
+            <circle cx="19" cy="3" r="2.5" fill={muted}/>
+          </svg>
+        )}
+      </div>
+      {/* large title */}
+      <div style={{
+        padding: '0 16px',
+        fontFamily: '-apple-system, system-ui',
+        fontSize: 34, fontWeight: 700, lineHeight: '41px',
+        color: text, letterSpacing: 0.4,
+      }}>{title}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Grouped list (inset card, r:26) + row (52px)
+// ─────────────────────────────────────────────────────────────
+function IOSListRow({ title, detail, icon, chevron = true, isLast = false, dark = false }) {
+  const text = dark ? '#fff' : '#000';
+  const sec = dark ? 'rgba(235,235,245,0.6)' : 'rgba(60,60,67,0.6)';
+  const ter = dark ? 'rgba(235,235,245,0.3)' : 'rgba(60,60,67,0.3)';
+  const sep = dark ? 'rgba(84,84,88,0.65)' : 'rgba(60,60,67,0.12)';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', minHeight: 52,
+      padding: '0 16px', position: 'relative',
+      fontFamily: '-apple-system, system-ui', fontSize: 17,
+      letterSpacing: -0.43,
+    }}>
+      {icon && (
+        <div style={{
+          width: 30, height: 30, borderRadius: 7, background: icon,
+          marginRight: 12, flexShrink: 0,
+        }} />
+      )}
+      <div style={{ flex: 1, color: text }}>{title}</div>
+      {detail && <span style={{ color: sec, marginRight: 6 }}>{detail}</span>}
+      {chevron && (
+        <svg width="8" height="14" viewBox="0 0 8 14" style={{ flexShrink: 0 }}>
+          <path d="M1 1l6 6-6 6" stroke={ter} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+      {!isLast && (
+        <div style={{
+          position: 'absolute', bottom: 0, right: 0,
+          left: icon ? 58 : 16, height: 0.5, background: sep,
+        }} />
+      )}
+    </div>
+  );
+}
+
+function IOSList({ header, children, dark = false }) {
+  const hc = dark ? 'rgba(235,235,245,0.6)' : 'rgba(60,60,67,0.6)';
+  const bg = dark ? '#1C1C1E' : '#fff';
+  return (
+    <div>
+      {header && (
+        <div style={{
+          fontFamily: '-apple-system, system-ui', fontSize: 13,
+          color: hc, textTransform: 'uppercase',
+          padding: '8px 36px 6px', letterSpacing: -0.08,
+        }}>{header}</div>
+      )}
+      <div style={{
+        background: bg, borderRadius: 26,
+        margin: '0 16px', overflow: 'hidden',
+      }}>{children}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Device frame
+// ─────────────────────────────────────────────────────────────
+function IOSDevice({
+  children, width = 402, height = 874, dark = false,
+  title, keyboard = false,
+}) {
+  return (
+    <div style={{
+      width, height, borderRadius: 48, overflow: 'hidden',
+      position: 'relative', background: dark ? '#000' : '#F2F2F7',
+      boxShadow: '0 40px 80px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.12)',
+      fontFamily: '-apple-system, system-ui, sans-serif',
+      WebkitFontSmoothing: 'antialiased',
+    }}>
+      {/* dynamic island */}
+      <div style={{
+        position: 'absolute', top: 11, left: '50%', transform: 'translateX(-50%)',
+        width: 126, height: 37, borderRadius: 24, background: '#000', zIndex: 50,
+      }} />
+      {/* status bar (absolute) */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+        <IOSStatusBar dark={dark} />
+      </div>
+      {/* nav + content */}
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {title !== undefined && <IOSNavBar title={title} dark={dark} />}
+        <div style={{ flex: 1, overflow: 'auto' }}>{children}</div>
+        {keyboard && <IOSKeyboard dark={dark} />}
+      </div>
+      {/* home indicator — always on top */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 60,
+        height: 34, display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+        paddingBottom: 8, pointerEvents: 'none',
+      }}>
+        <div style={{
+          width: 139, height: 5, borderRadius: 100,
+          background: dark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.25)',
+        }} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Keyboard — iOS 26 liquid glass
+// ─────────────────────────────────────────────────────────────
+function IOSKeyboard({ dark = false }) {
+  const glyph = dark ? 'rgba(255,255,255,0.7)' : '#595959';
+  const sugg = dark ? 'rgba(255,255,255,0.6)' : '#333';
+  const keyBg = dark ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.85)';
+
+  // special-key icons
+  const icons = {
+    shift: <svg width="19" height="17" viewBox="0 0 19 17"><path d="M9.5 1L1 9.5h4.5V16h8V9.5H18L9.5 1z" fill={glyph}/></svg>,
+    del: <svg width="23" height="17" viewBox="0 0 23 17"><path d="M7 1h13a2 2 0 012 2v11a2 2 0 01-2 2H7l-6-7.5L7 1z" fill="none" stroke={glyph} strokeWidth="1.6" strokeLinejoin="round"/><path d="M10 5l7 7M17 5l-7 7" stroke={glyph} strokeWidth="1.6" strokeLinecap="round"/></svg>,
+    ret: <svg width="20" height="14" viewBox="0 0 20 14"><path d="M18 1v6H4m0 0l4-4M4 7l4 4" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  };
+
+  const key = (content, { w, flex, ret, fs = 25, k } = {}) => (
+    <div key={k} style={{
+      height: 42, borderRadius: 8.5,
+      flex: flex ? 1 : undefined, width: w, minWidth: 0,
+      background: ret ? '#08f' : keyBg,
+      boxShadow: '0 1px 0 rgba(0,0,0,0.075)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: '-apple-system, "SF Compact", system-ui',
+      fontSize: fs, fontWeight: 458, color: ret ? '#fff' : glyph,
+    }}>{content}</div>
+  );
+
+  const row = (keys, pad = 0) => (
+    <div style={{ display: 'flex', gap: 6.5, justifyContent: 'center', padding: `0 ${pad}px` }}>
+      {keys.map(l => key(l, { flex: true, k: l }))}
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: 'relative', zIndex: 15, borderRadius: 27, overflow: 'hidden',
+      padding: '11px 0 2px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      boxShadow: dark
+        ? '0 -2px 20px rgba(0,0,0,0.09)'
+        : '0 -1px 6px rgba(0,0,0,0.018), 0 -3px 20px rgba(0,0,0,0.012)',
+    }}>
+      {/* liquid glass bg — same recipe as nav pills */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 27,
+        backdropFilter: 'blur(12px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+        background: dark ? 'rgba(120,120,128,0.14)' : 'rgba(255,255,255,0.25)',
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 27,
+        boxShadow: dark
+          ? 'inset 1.5px 1.5px 1px rgba(255,255,255,0.15)'
+          : 'inset 1.5px 1.5px 1px rgba(255,255,255,0.7), inset -1px -1px 1px rgba(255,255,255,0.4)',
+        border: dark ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid rgba(0,0,0,0.06)',
+        pointerEvents: 'none',
+      }} />
+
+      {/* autocorrect bar */}
+      <div style={{
+        display: 'flex', gap: 20, alignItems: 'center',
+        padding: '8px 22px 13px', width: '100%', boxSizing: 'border-box',
+        position: 'relative',
+      }}>
+        {['"The"', 'the', 'to'].map((w, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <div style={{ width: 1, height: 25, background: '#ccc', opacity: 0.3 }} />}
+            <div style={{
+              flex: 1, textAlign: 'center',
+              fontFamily: '-apple-system, system-ui', fontSize: 17,
+              color: sugg, letterSpacing: -0.43, lineHeight: '22px',
+            }}>{w}</div>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* key layout */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 13,
+        padding: '0 6.5px', width: '100%', boxSizing: 'border-box',
+        position: 'relative',
+      }}>
+        {row(['q','w','e','r','t','y','u','i','o','p'])}
+        {row(['a','s','d','f','g','h','j','k','l'], 20)}
+        <div style={{ display: 'flex', gap: 14.25, alignItems: 'center' }}>
+          {key(icons.shift, { w: 45, k: 'shift' })}
+          <div style={{ display: 'flex', gap: 6.5, flex: 1 }}>
+            {['z','x','c','v','b','n','m'].map(l => key(l, { flex: true, k: l }))}
+          </div>
+          {key(icons.del, { w: 45, k: 'del' })}
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {key('ABC', { w: 92.25, fs: 18, k: 'abc' })}
+          {key('', { flex: true, k: 'space' })}
+          {key(icons.ret, { w: 92.25, ret: true, k: 'ret' })}
+        </div>
+      </div>
+
+      {/* bottom spacer (emoji+mic area, icons omitted) */}
+      <div style={{ height: 56, width: '100%', position: 'relative' }} />
+    </div>
+  );
+}
+
+// ═══ screens-dashboard.jsx ═══
+// screens-dashboard.jsx — Home / Today view
+
+const DASHBOARD_QUOTES = [
+  { text: 'Você tem poder sobre sua mente — não sobre eventos externos. Perceba isso, e você encontrará força.', author: 'Marco Aurélio' },
+  { text: 'A jornada de mil milhas começa com um único passo.', author: 'Lao-Tsé' },
+  { text: 'Não é porque as coisas são difíceis que não ousamos; é porque não ousamos que elas são difíceis.', author: 'Sêneca' },
+  { text: 'O obstáculo no caminho se torna o caminho.', author: 'Marco Aurélio' },
+  { text: 'Somos aquilo que repetidamente fazemos. A excelência, portanto, não é um ato, mas um hábito.', author: 'Aristóteles' },
+  { text: 'Conhece-te a ti mesmo.', author: 'Oráculo de Delfos' },
+  { text: 'A disciplina é a ponte entre metas e conquistas.', author: 'Jim Rohn' },
+  { text: 'O que não te mata, te fortalece.', author: 'Nietzsche' },
+  { text: 'Enquanto esperamos pela vida, ela passa.', author: 'Sêneca' },
+  { text: 'Tudo que temos que decidir é o que fazer com o tempo que nos é dado.', author: 'Gandalf' },
+  { text: 'Não toda tempestade vem atrapalhar sua vida — algumas vêm abrir o caminho.', author: 'provérbio' },
+  { text: 'Pequenas ações diárias superam grandes intenções ocasionais.', author: 'James Clear' },
+  { text: 'A qualidade da sua vida é definida pela qualidade dos seus hábitos.', author: 'Brian Tracy' },
+  { text: 'Quem vence a si mesmo é mais forte que aquele que vence mil batalhas.', author: 'Buda' },
+  { text: 'Não busques que os acontecimentos sigam teus desejos. Que teus desejos sigam os acontecimentos.', author: 'Epicteto' },
+  { text: 'Foco não é dizer sim para o que importa. É dizer não para quase tudo o mais.', author: 'Warren Buffett' },
+  { text: 'Viver é a coisa mais rara no mundo. A maioria das pessoas apenas existe.', author: 'Oscar Wilde' },
+  { text: 'Não há vento favorável para quem não sabe onde vai.', author: 'Sêneca' },
+  { text: 'Aja como se o que você faz fizesse diferença. Faz.', author: 'William James' },
+  { text: 'A cada manhã, quando abres os olhos, lembra-te: tens o privilégio de viver.', author: 'Marco Aurélio' },
+  { text: 'A dor é inevitável. O sofrimento é opcional.', author: 'Haruki Murakami' },
+  { text: 'Tudo o que você sempre quis está do outro lado do medo.', author: 'George Addair' },
+  { text: 'Não corra mais rápido do que seu anjo da guarda consegue voar.', author: 'provérbio irlandês' },
+  { text: 'A verdadeira viagem de descoberta não consiste em procurar novas paisagens, mas em ter novos olhos.', author: 'Marcel Proust' },
+];
+
+function DashboardScreen({ state, dispatch, setScreen, user }) {
+  const { attrXp, habits, agenda, quests } = state;
+  const totalXp = Object.values(attrXp).reduce((a, b) => a + b, 0);
+  const heroLevel = deriveLevel(totalXp);
+
+  const todayISO = dateISO(today);
+  const todayAgenda = agenda.filter(t => t.date === todayISO).sort((a, b) => a.time.localeCompare(b.time));
+  const doneTodayAgenda = todayAgenda.filter(t => t.done).length;
+
+  const todayDayIdx = 3; // Wed (0=Mon..6=Sun for our week array) — fake day index
+  const todayHabits = habits.filter(h => !(h.freq === 'weekday' && (todayDayIdx === 5 || todayDayIdx === 6)));
+  const doneHabits = todayHabits.filter(h => h.done[todayDayIdx] === 1).length;
+
+  const gainedToday = state.xpGainedToday;
+
+  // Dynamic greeting based on local time
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? 'Boa madrugada'
+                 : hour < 12 ? 'Bom dia'
+                 : hour < 18 ? 'Boa tarde'
+                 : 'Boa noite';
+  const firstName = (user?.name || 'viajante').split(' ')[0];
+
+  // Rotating motivational quote — index stable per day
+  const dayOfYear = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+  const quote = DASHBOARD_QUOTES[dayOfYear % DASHBOARD_QUOTES.length];
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1280, margin: '0 auto' }}>
+      {/* Hero */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 24, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 280 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>
+            Sexta-feira · 17 de abril, 2026
+          </div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>
+            {greeting}, {firstName}.
+          </div>
+          <div className="serif" style={{ fontSize: 15, marginTop: 10, color: 'var(--ink-2)', fontStyle: 'italic', lineHeight: 1.4, maxWidth: 440 }}>
+            “{quote.text}”
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)', marginTop: 4, fontStyle: 'normal', letterSpacing: '0.04em' }}>
+              — {quote.author}
+            </span>
+          </div>
+          <div style={{ color: 'var(--ink-3)', marginTop: 10, fontSize: 13 }}>
+            {todayAgenda.length} compromissos · {todayHabits.length} hábitos · {quests.length} quests ativas
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className="card" style={{ padding: '12px 18px', display: 'flex', gap: 14, alignItems: 'center' }}>
+            <LevelBadge level={heroLevel.level} size={44} hue="var(--accent)" />
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Aventureiro</div>
+              <div className="serif" style={{ fontSize: 22, lineHeight: 1 }}>Nível {heroLevel.level}</div>
+              <div style={{ width: 140, marginTop: 6 }}>
+                <div className="xp-bar"><div className="fill" style={{ width: `${heroLevel.progress * 100}%`, '--hue': 'var(--accent)' }} /></div>
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 3 }}>
+                {heroLevel.xpInLevel} / {heroLevel.xpToNext} XP
+              </div>
+            </div>
+          </div>
+          <div className="card" style={{ padding: '12px 18px', minWidth: 120 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>XP hoje</div>
+            <div className="serif" style={{ fontSize: 28, lineHeight: 1, marginTop: 4, color: gainedToday > 0 ? 'var(--accent)' : 'var(--ink)' }}>
+              +{gainedToday}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>
+              {gainedToday > 80 ? '🔥 Excelente ritmo' : gainedToday > 40 ? 'Bom progresso' : 'Começando o dia'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 18 }}>
+        {/* Left column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Today agenda */}
+          <div className="card" style={{ padding: 20 }}>
+            <SectionHeader title="Agenda" right={<span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{doneTodayAgenda}/{todayAgenda.length}</span>} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+              {todayAgenda.length === 0 ? (
+                <EmptyState
+                  icon="cal"
+                  title="Nenhum evento hoje"
+                  hint="Crie tarefas na Agenda Diária."
+                  action={{ label: 'Ir para Agenda →', onClick: () => setScreen('daily') }}
+                />
+              ) : todayAgenda.map(t => <AgendaRow key={t.id} task={t} state={state} dispatch={dispatch} />)}
+            </div>
+          </div>
+
+          {/* Habits today */}
+          <div className="card" style={{ padding: 20 }}>
+            <SectionHeader title="Hábitos" right={
+              <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{doneHabits}/{todayHabits.length}</span>
+            } />
+            {todayHabits.length === 0 ? (
+              <EmptyState
+                icon="habit"
+                title="Sem hábitos ainda"
+                hint="Comece com 1 hábito diário — pequeno e consistente."
+                action={{ label: 'Adicionar hábito →', onClick: () => setScreen('habits') }}
+              />
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
+                {todayHabits.map(h => <HabitMiniCard key={h.id} habit={h} state={state} dispatch={dispatch} dayIdx={todayDayIdx} />)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Attributes */}
+          <div className="card" style={{ padding: 20 }}>
+            <SectionHeader title="Atributos" right={
+              <button className="btn ghost" onClick={() => setScreen('character')} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                Ver tudo <Icon name="chev" size={12} />
+              </button>
+            } />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+              {ATTRIBUTES.map(a => {
+                const lvl = deriveLevel(attrXp[a.id]);
+                return (
+                  <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto', gap: 10, alignItems: 'center' }}>
+                    <LevelBadge level={lvl.level} size={24} hue={a.hue} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                        <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{a.name}</span>
+                        <span className="mono" style={{ color: 'var(--ink-3)', fontSize: 10 }}>{lvl.xpInLevel}/{lvl.xpToNext}</span>
+                      </div>
+                      <div className="xp-bar"><div className="fill" style={{ width: `${lvl.progress * 100}%`, '--hue': a.hue }} /></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Quests */}
+          <div className="card" style={{ padding: 20 }}>
+            <SectionHeader title="Quests" right={
+              <span className="streak-badge" style={{ fontSize: 10 }}>{quests.length} ATIVAS</span>
+            } />
+            {quests.length === 0 ? (
+              <EmptyState
+                icon="trophy"
+                title="Nenhuma quest ativa"
+                hint="Quests são metas de longo prazo — ex: “ler 12 livros em 2026”."
+                action={{ label: 'Criar quest →', onClick: () => setScreen('goals') }}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+                {quests.slice(0, 3).map(q => {
+                  const attr = ATTRIBUTES.find(a => a.id === q.attr);
+                  const pct = (q.progress / q.target) * 100;
+                  return (
+                    <div key={q.id}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4, gap: 8 }}>
+                        <span style={{ color: 'var(--ink)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                          <span style={{ color: attr.hue, marginRight: 6 }}>{attr.icon}</span>
+                          {q.name}
+                        </span>
+                        <span className="mono" style={{ color: 'var(--ink-3)', fontSize: 11, flexShrink: 0 }}>
+                          {q.progress}/{q.target}
+                        </span>
+                      </div>
+                      <div className="xp-bar"><div className="fill" style={{ width: `${pct}%`, '--hue': attr.hue }} /></div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 3 }}>
+                        Recompensa: <span className="mono" style={{ color: 'var(--accent)' }}>+{q.xp} XP</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ title, right }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+      <div className="serif" style={{ fontSize: 20, color: 'var(--ink)', lineHeight: 1.2 }}>{title}</div>
+      <div style={{ flexShrink: 0 }}>{right}</div>
+    </div>
+  );
+}
+
+function AgendaRow({ task, state, dispatch }) {
+  const area = (state.areas || []).find(a => a.id === task.area);
+  const project = task.project ? (state.projects || []).find(p => p.id === task.project) : null;
+  return (
+    <div
+      onClick={() => dispatch({ type: 'toggleAgenda', id: task.id })}
+      style={{
+        display: 'grid', gridTemplateColumns: '20px 68px 1fr auto', gap: 12,
+        alignItems: 'center', padding: '10px 8px', borderRadius: 8,
+        cursor: 'pointer', transition: 'background 0.12s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <Checkbox checked={task.done} onChange={() => dispatch({ type: 'toggleAgenda', id: task.id })} />
+      <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{task.time}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span style={{
+          color: task.done ? 'var(--ink-4)' : 'var(--ink)',
+          textDecoration: task.done ? 'line-through' : 'none',
+          fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{task.title}</span>
+        {project && <span className="stat-pill" style={{ fontSize: 10, padding: '1px 6px' }}>{project.name.slice(0, 20)}</span>}
+      </div>
+      {area && <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: area.color }}>
+        <span>{area.icon}</span>
+      </div>}
+    </div>
+  );
+}
+
+function HabitMiniCard({ habit, state, dispatch, dayIdx }) {
+  const attr = ATTRIBUTES.find(a => a.id === habit.attr);
+  const done = habit.done[dayIdx] === 1;
+  return (
+    <div
+      onClick={() => dispatch({ type: 'toggleHabit', id: habit.id, day: dayIdx })}
+      style={{
+        padding: '10px 12px', borderRadius: 10,
+        border: `1px solid ${done ? 'transparent' : 'var(--line)'}`,
+        background: done ? `color-mix(in oklch, ${attr.hue} 10%, var(--surface-2))` : 'var(--surface-2)',
+        cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}
+    >
+      <Checkbox checked={done} onChange={() => dispatch({ type: 'toggleHabit', id: habit.id, day: dayIdx })} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 500,
+          color: done ? 'var(--ink-3)' : 'var(--ink)',
+          textDecoration: done ? 'line-through' : 'none',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{habit.name}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+          <span style={{ fontSize: 10, color: attr.hue, fontWeight: 500 }}>{attr.icon} {attr.abbr}</span>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>+{habit.xp}</span>
+          <Streak n={habit.streak} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-agenda.jsx ═══
+// screens-agenda.jsx — Daily, Weekly, Monthly agenda views
+
+function DailyScreen({ state, dispatch }) {
+  const [dateOffset, setDateOffset] = React.useState(0);
+  const [showNew, setShowNew] = React.useState(false);
+  const d = addDays(today, dateOffset);
+  const iso = dateISO(d);
+  const tasks = state.agenda.filter(t => t.date === iso).sort((a, b) => a.time.localeCompare(b.time));
+  const areas = state.areas || [];
+  const projects = state.projects || [];
+
+  const hours = Array.from({ length: 16 }, (_, i) => i + 6); // 6am → 9pm
+
+  const parseTime = (t) => { const [h, m] = t.split(':').map(Number); return h + m / 60; };
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>
+            {d.toLocaleDateString('pt-BR', { weekday: 'long' })}
+          </div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>
+            {d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' })}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn" onClick={() => setDateOffset(o => o - 1)}>‹ Anterior</button>
+          <button className="btn" onClick={() => setDateOffset(0)}>Hoje</button>
+          <button className="btn" onClick={() => setDateOffset(o => o + 1)}>Próximo ›</button>
+          <button className="btn primary" onClick={() => setShowNew(true)} style={{ marginLeft: 8 }}>
+            <Icon name="plus" size={14} /> Adicionar
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
+        {/* Timeline */}
+        <div className="card" style={{ padding: 20, position: 'relative' }}>
+          <div style={{ position: 'relative', minHeight: hours.length * 56 }}>
+            {hours.map((h, i) => (
+              <div key={h} style={{ position: 'relative', height: 56, borderTop: i === 0 ? 'none' : '1px solid var(--line)' }}>
+                <span className="mono" style={{ position: 'absolute', left: 0, top: -8, fontSize: 10, color: 'var(--ink-4)', background: 'var(--surface)', padding: '2px 6px' }}>
+                  {String(h).padStart(2, '0')}:00
+                </span>
+              </div>
+            ))}
+            {/* now line */}
+            {dateOffset === 0 && (() => {
+              const nowHour = 10.5; // 10:30 for demo
+              const y = (nowHour - 6) * 56;
+              return (
+                <div style={{ position: 'absolute', left: 50, right: 0, top: y, height: 2, background: 'var(--accent)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', left: -5, top: -4, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)' }} />
+                  <span className="mono" style={{ position: 'absolute', right: 0, top: -16, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>AGORA 10:30</span>
+                </div>
+              );
+            })()}
+            {tasks.length === 0 && (
+              <div style={{ position: 'absolute', left: 58, right: 12, top: 80 }}>
+                <EmptyState
+                  icon="cal"
+                  title="Dia livre"
+                  hint="Clique em Adicionar para criar um compromisso ou tarefa com horário."
+                  action={{ label: '+ Adicionar', onClick: () => setShowNew(true) }}
+                />
+              </div>
+            )}
+            {tasks.map(t => {
+              const start = parseTime(t.time);
+              const end = parseTime(t.end);
+              const top = (start - 6) * 56;
+              const height = Math.max(26, (end - start) * 56 - 2);
+              const area = areas.find(a => a.id === t.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
+              const project = t.project ? projects.find(p => p.id === t.project) : null;
+              return (
+                <div key={t.id}
+                  onClick={() => dispatch({ type: 'toggleAgenda', id: t.id })}
+                  style={{
+                    position: 'absolute', left: 58, right: 12, top, height,
+                    background: `color-mix(in oklch, ${area.color} ${t.done ? 8 : 15}%, var(--surface))`,
+                    border: `1px solid color-mix(in oklch, ${area.color} ${t.done ? 20 : 35}%, transparent)`,
+                    borderLeft: `3px solid ${area.color}`,
+                    borderRadius: 6, padding: '6px 10px',
+                    cursor: 'pointer', overflow: 'hidden',
+                    opacity: t.done ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 500,
+                    textDecoration: t.done ? 'line-through' : 'none', color: 'var(--ink)' }}>
+                    <Checkbox checked={t.done} onChange={() => dispatch({ type: 'toggleAgenda', id: t.id })} size={14} />
+                    {t.title}
+                  </div>
+                  {height > 40 && (
+                    <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+                      <span className="mono">{t.time}–{t.end}</span>
+                      {project && <span>· {project.name}</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sidebar: habits + notes */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 18 }}>
+            <div className="serif" style={{ fontSize: 18, marginBottom: 12 }}>Rituais do dia</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {state.habits.slice(0, 5).map(h => <HabitMiniCard key={h.id} habit={h} state={state} dispatch={dispatch} dayIdx={3} />)}
+            </div>
+          </div>
+          <div className="card" style={{ padding: 18 }}>
+            <div className="serif" style={{ fontSize: 18, marginBottom: 8 }}>Reflexão</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6, fontStyle: 'italic' }}>
+              "Começou o dia cedo e com energia. A sessão de deep work foi produtiva — terminei o refactor dos componentes."
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+              <span className="stat-pill">energia: alta</span>
+              <span className="stat-pill">humor: bom</span>
+              <span className="stat-pill">foco: 8/10</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showNew && <NewAgendaModal
+        defaultDate={iso}
+        areas={areas}
+        projects={projects}
+        onClose={() => setShowNew(false)}
+        onCreate={(task) => {
+          dispatch({ type: 'addAgenda', task });
+          setShowNew(false);
+        }}
+      />}
+    </div>
+  );
+}
+
+function NewAgendaModal({ defaultDate, areas, projects, onClose, onCreate }) {
+  const [title, setTitle] = React.useState('');
+  const [date, setDate] = React.useState(defaultDate);
+  const [time, setTime] = React.useState('09:00');
+  const [end, setEnd] = React.useState('10:00');
+  const [kind, setKind] = React.useState('task'); // 'task' | 'event'
+  const [area, setArea] = React.useState(areas[0]?.id || '');
+  const [project, setProject] = React.useState('');
+  const [notes, setNotes] = React.useState('');
+
+  const canCreate = title.trim().length >= 2;
+
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Auto-adjust end time when start changes
+  function onTimeChange(v) {
+    setTime(v);
+    const [h, m] = v.split(':').map(Number);
+    const endH = Math.min(23, h + 1);
+    setEnd(`${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  }
+
+  function submit() {
+    if (!canCreate) return;
+    onCreate({
+      id: 't' + Date.now(),
+      title: title.trim(),
+      kind,
+      date,
+      time,
+      end,
+      area: area || null,
+      project: project || null,
+      notes: notes.trim() || undefined,
+      done: false,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const areaProjects = projects.filter(p => !area || p.area === area);
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20, backdropFilter: 'blur(4px)', animation: 'fadeUp 0.2s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{
+        width: '100%', maxWidth: 580, padding: 28, maxHeight: '90vh', overflow: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Agenda</div>
+            <div className="serif" style={{ fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>Novo {kind === 'event' ? 'compromisso' : 'task'}</div>
+          </div>
+          <button className="btn ghost" onClick={onClose} style={{ padding: 4 }}><Icon name="x" size={16} /></button>
+        </div>
+
+        {/* Kind toggle */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
+          <button onClick={() => setKind('task')}
+            className={kind === 'task' ? 'class-btn active' : 'class-btn'}
+            style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 500 }}>
+            <Icon name="check" size={14} /> Tarefa
+          </button>
+          <button onClick={() => setKind('event')}
+            className={kind === 'event' ? 'class-btn active' : 'class-btn'}
+            style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 500 }}>
+            <Icon name="cal" size={14} /> Compromisso
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Título *</label>
+          <input autoFocus value={title} onChange={e => setTitle(e.target.value)}
+            placeholder={kind === 'task' ? 'Ex: Escrever relatório, Estudar cap 4…' : 'Ex: Reunião com equipe, Consulta médica…'}
+            style={FIELD_INPUT} />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr', gap: 10, marginTop: 16 }}>
+          <div>
+            <label style={FIELD_LABEL}>Data</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={FIELD_INPUT} />
+          </div>
+          <div>
+            <label style={FIELD_LABEL}>Início</label>
+            <input type="time" value={time} onChange={e => onTimeChange(e.target.value)} style={FIELD_INPUT} />
+          </div>
+          <div>
+            <label style={FIELD_LABEL}>Fim</label>
+            <input type="time" value={end} onChange={e => setEnd(e.target.value)} style={FIELD_INPUT} />
+          </div>
+        </div>
+
+        {areas.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <label style={FIELD_LABEL}>Área <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+              <button onClick={() => { setArea(''); setProject(''); }}
+                className={!area ? 'class-btn active' : 'class-btn'}
+                style={{ padding: '6px 12px', fontSize: 12 }}>Nenhuma</button>
+              {areas.map(a => (
+                <button key={a.id} onClick={() => { setArea(a.id); setProject(''); }}
+                  className={area === a.id ? 'class-btn active' : 'class-btn'}
+                  style={{ padding: '6px 12px', fontSize: 12 }}>
+                  <span style={{ color: a.color, marginRight: 6 }}>{a.icon}</span>{a.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {area && areaProjects.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <label style={FIELD_LABEL}>Projeto <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+            <select value={project} onChange={e => setProject(e.target.value)} style={FIELD_INPUT}>
+              <option value="">— Sem projeto —</option>
+              {areaProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Notas <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            rows={2} placeholder="Detalhes, contexto, links…"
+            style={{ ...FIELD_INPUT, resize: 'vertical', minHeight: 52, fontFamily: 'inherit' }} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+          <button className="btn primary" onClick={submit} disabled={!canCreate}
+            style={{ fontSize: 13, padding: '10px 18px', opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed' }}>
+            Criar {kind === 'event' ? 'compromisso' : 'tarefa'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WeeklyScreen({ state, dispatch }) {
+  const [showNew, setShowNew] = React.useState(false);
+  const weekStart = addDays(today, -3); // Mon of current week (today = Fri, 17 Apr → Mon 14)
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const hours = [6,8,10,12,14,16,18,20,22];
+  const parseTime = (t) => { const [h, m] = t.split(':').map(Number); return h + m / 60; };
+  const areas = state.areas || [];
+  const projects = state.projects || [];
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>
+            Semana 16 · 2026
+          </div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>
+            14 – 20 de abril
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <StatPill label="Compromissos" value={state.agenda.filter(t => {
+            const d = new Date(t.date);
+            return d >= weekStart && d <= addDays(weekStart, 6);
+          }).length} />
+          <StatPill label="Concluídos" value={state.agenda.filter(t => {
+            const d = new Date(t.date);
+            return d >= weekStart && d <= addDays(weekStart, 6) && t.done;
+          }).length} />
+          <StatPill label="XP da semana" value={`+${state.xpGainedToday}`} accent />
+          <button className="btn primary" onClick={() => setShowNew(true)} style={{ marginLeft: 8 }}>
+            <Icon name="plus" size={14} /> Adicionar
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', borderBottom: '1px solid var(--line)' }}>
+          <div />
+          {days.map((d, i) => {
+            const isToday = dateISO(d) === dateISO(today);
+            return (
+              <div key={i} style={{
+                padding: '12px 10px', borderLeft: '1px solid var(--line)',
+                background: isToday ? 'color-mix(in oklch, var(--accent) 8%, transparent)' : 'transparent',
+              }}>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+                  {d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.','')}
+                </div>
+                <div className="serif" style={{ fontSize: 22, color: isToday ? 'var(--accent)' : 'var(--ink)' }}>
+                  {d.getDate()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', minHeight: (22-6) * 26 }}>
+          <div style={{ position: 'relative' }}>
+            {hours.map(h => (
+              <div key={h} style={{ position: 'absolute', top: (h - 6) * 26 - 7, left: 0, right: 0, padding: '0 10px', fontSize: 10, color: 'var(--ink-4)' }} className="mono">
+                {String(h).padStart(2,'0')}:00
+              </div>
+            ))}
+          </div>
+          {days.map((d, di) => {
+            const iso = dateISO(d);
+            const tasks = state.agenda.filter(t => t.date === iso);
+            return (
+              <div key={di} style={{ position: 'relative', borderLeft: '1px solid var(--line)', minHeight: 420 }}>
+                {hours.map(h => <div key={h} style={{ position: 'absolute', top: (h - 6) * 26, left: 0, right: 0, height: 1, background: 'var(--line)', opacity: 0.5 }} />)}
+                {tasks.map(t => {
+                  const start = parseTime(t.time);
+                  const end = parseTime(t.end);
+                  const top = (start - 6) * 26;
+                  const height = Math.max(18, (end - start) * 26 - 1);
+                  const area = areas.find(a => a.id === t.area) || { color: 'var(--ink-3)' };
+                  return (
+                    <div key={t.id}
+                      onClick={() => dispatch({ type: 'toggleAgenda', id: t.id })}
+                      style={{
+                        position: 'absolute', left: 2, right: 2, top, height,
+                        background: `color-mix(in oklch, ${area.color} ${t.done ? 8 : 18}%, var(--surface))`,
+                        borderLeft: `2px solid ${area.color}`, borderRadius: 4, padding: '2px 6px',
+                        fontSize: 10.5, color: 'var(--ink)', overflow: 'hidden', cursor: 'pointer',
+                        textDecoration: t.done ? 'line-through' : 'none', opacity: t.done ? 0.6 : 1,
+                        fontWeight: 500, lineHeight: 1.2,
+                      }}
+                    >
+                      <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+                      {height > 30 && <div className="mono" style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 1 }}>{t.time}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {showNew && <NewAgendaModal
+        defaultDate={dateISO(today)}
+        areas={areas}
+        projects={projects}
+        onClose={() => setShowNew(false)}
+        onCreate={(task) => {
+          dispatch({ type: 'addAgenda', task });
+          setShowNew(false);
+        }}
+      />}
+    </div>
+  );
+}
+
+function MonthlyScreen({ state, dispatch }) {
+  const [showNew, setShowNew] = React.useState(false);
+  // April 2026: starts Wed (Apr 1)
+  const monthStart = new Date('2026-04-01');
+  const firstDay = monthStart.getDay(); // 3 (Wed)
+  const offsetStart = (firstDay + 6) % 7; // shift: Mon=0..Sun=6 → April 1 is Wed → offset 2
+  const gridStart = addDays(monthStart, -offsetStart);
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const areas = state.areas || [];
+  const projects = state.projects || [];
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Abril · 2026</div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Visão mensal</div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', maxWidth: 400 }}>
+          {areas.slice(0, 6).map(a => (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--ink-3)' }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: a.color }} />
+              {a.name}
+            </div>
+          ))}
+          </div>
+          <button className="btn primary" onClick={() => setShowNew(true)}>
+            <Icon name="plus" size={14} /> Adicionar
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--line)' }}>
+          {['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map(d => (
+            <div key={d} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{d}</div>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: '120px' }}>
+          {cells.map((d, i) => {
+            const iso = dateISO(d);
+            const inMonth = d.getMonth() === 3;
+            const isToday = iso === dateISO(today);
+            const tasks = state.agenda.filter(t => t.date === iso);
+            return (
+              <div key={i} style={{
+                padding: 8, borderRight: (i % 7 !== 6) ? '1px solid var(--line)' : 'none',
+                borderBottom: '1px solid var(--line)',
+                background: isToday ? 'color-mix(in oklch, var(--accent) 6%, var(--surface))' : 'var(--surface)',
+                opacity: inMonth ? 1 : 0.35,
+                display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="serif" style={{ fontSize: 16, color: isToday ? 'var(--accent)' : 'var(--ink-2)', fontWeight: isToday ? 500 : 400 }}>
+                    {d.getDate()}
+                  </span>
+                  {tasks.length > 0 && <span className="mono" style={{ fontSize: 9, color: 'var(--ink-4)' }}>{tasks.length}</span>}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden' }}>
+                  {tasks.slice(0, 3).map(t => {
+                    const area = areas.find(a => a.id === t.area) || { color: 'var(--ink-3)' };
+                    return (
+                      <div key={t.id} style={{
+                        fontSize: 10.5, padding: '1px 5px', borderRadius: 3,
+                        background: `color-mix(in oklch, ${area.color} ${t.done ? 10 : 18}%, transparent)`,
+                        color: 'var(--ink)',
+                        borderLeft: `2px solid ${area.color}`,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        textDecoration: t.done ? 'line-through' : 'none',
+                        opacity: t.done ? 0.55 : 1,
+                      }}>
+                        {t.title}
+                      </div>
+                    );
+                  })}
+                  {tasks.length > 3 && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>+{tasks.length - 3} mais</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {showNew && <NewAgendaModal
+        defaultDate={dateISO(today)}
+        areas={areas}
+        projects={projects}
+        onClose={() => setShowNew(false)}
+        onCreate={(task) => {
+          dispatch({ type: 'addAgenda', task });
+          setShowNew(false);
+        }}
+      />}
+    </div>
+  );
+}
+
+function StatPill({ label, value, accent }) {
+  return (
+    <div style={{ padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--surface)' }}>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 16, fontWeight: 500, color: accent ? 'var(--accent)' : 'var(--ink)', marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+
+// ═══ screens-habits.jsx ═══
+// screens-habits.jsx — Habits list with tracker + heatmap + CRUD
+
+function HabitsScreen({ state, dispatch }) {
+  const [selected, setSelected] = React.useState(state.habits[0]?.id);
+  const [modal, setModal] = React.useState(null); // null | {mode:'new'|'edit', habit?}
+  const habit = state.habits.find(h => h.id === selected) || state.habits[0];
+
+  // keep selection valid after delete
+  React.useEffect(() => {
+    if (!state.habits.find(h => h.id === selected) && state.habits[0]) {
+      setSelected(state.habits[0].id);
+    }
+  }, [state.habits, selected]);
+
+  if (!habit) {
+    return (
+      <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Rituais & Hábitos</div>
+            <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Tracker de hábitos</div>
+          </div>
+          <button className="btn primary" onClick={() => setModal({ mode: 'new' })}><Icon name="plus" size={14} /> Novo hábito</button>
+        </div>
+        <div className="card" style={{ padding: 60, textAlign: 'center' }}>
+          <div className="serif" style={{ fontSize: 22, color: 'var(--ink-2)' }}>Nenhum hábito ainda.</div>
+          <div style={{ color: 'var(--ink-3)', fontSize: 13, marginTop: 6 }}>Crie seu primeiro hábito para começar a subir de nível.</div>
+          <button className="btn primary" onClick={() => setModal({ mode: 'new' })} style={{ marginTop: 18 }}>
+            <Icon name="plus" size={14} /> Criar hábito
+          </button>
+        </div>
+        {modal && <HabitModal mode={modal.mode} habit={modal.habit} onClose={() => setModal(null)}
+          onSave={(h) => { dispatch({ type: 'addHabit', habit: h }); setSelected(h.id); setModal(null); }} />}
+      </div>
+    );
+  }
+
+  const attr = ATTRIBUTES.find(a => a.id === habit.attr);
+  const history = HABIT_HISTORY[habit.id] || Array(90).fill(null);
+
+  const last30 = history.slice(-30);
+  const doneCount = last30.filter(x => x === 1).length;
+  const applicable = last30.filter(x => x !== null).length;
+  const completionRate = applicable ? Math.round((doneCount / applicable) * 100) : 0;
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Rituais & Hábitos</div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Tracker de hábitos</div>
+        </div>
+        <button className="btn primary" onClick={() => setModal({ mode: 'new' })}><Icon name="plus" size={14} /> Novo hábito</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: 20 }}>
+        {/* list */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px 80px 60px 36px', padding: '14px 20px', borderBottom: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <div></div>
+            <div>Hábito</div>
+            <div>Atributo</div>
+            <div style={{ textAlign: 'center' }}>Últimos 7d</div>
+            <div style={{ textAlign: 'right' }}>Streak</div>
+            <div style={{ textAlign: 'right' }}>XP</div>
+            <div></div>
+          </div>
+          {state.habits.map(h => {
+            const ha = ATTRIBUTES.find(a => a.id === h.attr);
+            const isSel = h.id === selected;
+            const todayDone = h.done[3];
+            return (
+              <div key={h.id}
+                onClick={() => setSelected(h.id)}
+                style={{
+                  display: 'grid', gridTemplateColumns: '28px 1fr 100px 100px 80px 60px 36px', padding: '14px 20px',
+                  borderBottom: '1px solid var(--line)', alignItems: 'center', cursor: 'pointer',
+                  background: isSel ? 'var(--surface-2)' : 'transparent',
+                  borderLeft: isSel ? `3px solid ${ha.hue}` : '3px solid transparent',
+                }}
+              >
+                <Checkbox checked={todayDone === 1} onChange={() => dispatch({ type: 'toggleHabit', id: h.id, day: 3 })} />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>{h.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                    {h.freq === 'weekday' ? 'Seg–Sex' : 'Diário'}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: ha.hue, fontWeight: 500 }}>
+                  <span style={{ marginRight: 4 }}>{ha.icon}</span>{ha.name}
+                </div>
+                <div style={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                  {h.done.map((v, i) => (
+                    <div key={i} style={{
+                      width: 10, height: 20, borderRadius: 2,
+                      background: v === 1 ? ha.hue : v === null ? 'var(--line)' : 'color-mix(in oklch, var(--ink-4) 25%, var(--line))',
+                      opacity: v === null ? 0.35 : 1,
+                    }} />
+                  ))}
+                </div>
+                <div style={{ textAlign: 'right' }}><Streak n={h.streak} /></div>
+                <div className="mono" style={{ textAlign: 'right', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>+{h.xp}</div>
+                <HabitMenu habit={h}
+                  onEdit={() => setModal({ mode: 'edit', habit: h })}
+                  onDelete={() => {
+                    if (confirm(`Excluir o hábito "${h.name}"? Esta ação não pode ser desfeita.`)) {
+                      dispatch({ type: 'deleteHabit', id: h.id });
+                    }
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* detail */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 11, color: attr.hue, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  {attr.icon} {attr.name}
+                </div>
+                <div className="serif" style={{ fontSize: 26, marginTop: 6, lineHeight: 1.2 }}>{habit.name}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn ghost" onClick={() => setModal({ mode: 'edit', habit })} style={{ padding: 6, fontSize: 12 }} title="Editar">
+                  <Icon name="edit" size={14} />
+                </button>
+                <button className="btn ghost" onClick={() => {
+                  if (confirm(`Excluir o hábito "${habit.name}"?`)) {
+                    dispatch({ type: 'deleteHabit', id: habit.id });
+                  }
+                }} style={{ padding: 6, fontSize: 12, color: 'var(--forca)' }} title="Excluir">
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 16 }}>
+              <MetricCell label="Streak" value={habit.streak} suffix="dias" />
+              <MetricCell label="30d" value={`${completionRate}%`} />
+              <MetricCell label="XP total" value={habit.streak * habit.xp + 320} />
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Últimos 90 dias</div>
+              <Heatmap data={history} color={attr.hue} />
+            </div>
+
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--surface-2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Recompensa</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 6, alignItems: 'center' }}>
+                <span className="mono" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 600 }}>+{habit.xp} XP</span>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>em {attr.name}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {modal && <HabitModal
+        mode={modal.mode} habit={modal.habit}
+        onClose={() => setModal(null)}
+        onSave={(h) => {
+          if (modal.mode === 'new') {
+            dispatch({ type: 'addHabit', habit: h });
+            setSelected(h.id);
+          } else {
+            dispatch({ type: 'updateHabit', id: h.id, patch: h });
+          }
+          setModal(null);
+        }}
+      />}
+    </div>
+  );
+}
+
+function HabitMenu({ habit, onEdit, onDelete }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative', justifySelf: 'end' }} onClick={e => e.stopPropagation()}>
+      <button className="btn ghost" onClick={() => setOpen(v => !v)} style={{ padding: 4 }}>
+        <Icon name="dots" size={14} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 4,
+          background: 'var(--bg-2)', border: '1px solid var(--line)',
+          borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          minWidth: 140, zIndex: 100, overflow: 'hidden',
+        }}>
+          <button className="menu-item" onClick={() => { setOpen(false); onEdit(); }}>
+            <Icon name="edit" size={12} /> Editar
+          </button>
+          <button className="menu-item danger" onClick={() => { setOpen(false); onDelete(); }}>
+            <Icon name="trash" size={12} /> Excluir
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HabitModal({ mode, habit, onClose, onSave }) {
+  const [name, setName] = React.useState(habit?.name || '');
+  const [attr, setAttr] = React.useState(habit?.attr || 'disciplina');
+  const [xp, setXp] = React.useState(habit?.xp || 20);
+  const [icon, setIcon] = React.useState(habit?.icon || '◆');
+  const [freq, setFreq] = React.useState(habit?.freq || 'daily');
+
+  const canSave = name.trim().length >= 2;
+
+  function submit() {
+    if (!canSave) return;
+    if (mode === 'edit') {
+      onSave({ ...habit, name: name.trim(), attr, xp: Number(xp) || 10, icon, freq });
+    } else {
+      onSave({
+        id: 'h' + Date.now(),
+        name: name.trim(),
+        icon, attr, xp: Number(xp) || 10,
+        streak: 0,
+        freq,
+        done: [0, 0, 0, 0, 0, freq === 'weekday' ? null : 0, freq === 'weekday' ? null : 0],
+      });
+    }
+  }
+
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20, backdropFilter: 'blur(4px)',
+      animation: 'fadeUp 0.2s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{
+        width: '100%', maxWidth: 520, padding: 28, maxHeight: '90vh', overflow: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Hábito</div>
+            <div className="serif" style={{ fontSize: 28, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>
+              {mode === 'edit' ? 'Editar hábito' : 'Novo hábito'}
+            </div>
+          </div>
+          <button className="btn ghost" onClick={onClose} style={{ padding: 4 }}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        {/* Name */}
+        <div style={{ marginTop: 20 }}>
+          <label style={FIELD_LABEL}>Nome *</label>
+          <input value={name} onChange={e => setName(e.target.value)} autoFocus
+            placeholder="Ex: Meditar 10min, Ler, Correr…"
+            style={FIELD_INPUT} />
+        </div>
+
+        {/* Icon */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Ícone</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6, marginTop: 6 }}>
+            {['◆','◇','◈','◉','◎','◐','◑','◒','✦','☼','☽','△','▲','✶','♥','♦'].map(g => (
+              <button key={g} onClick={() => setIcon(g)}
+                className={icon === g ? 'avatar-swatch active' : 'avatar-swatch'}
+                style={{ aspectRatio: '1', fontSize: 16 }}>
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Attribute */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Atributo (qual ganha XP)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 6 }}>
+            {ATTRIBUTES.map(a => (
+              <button key={a.id} onClick={() => setAttr(a.id)}
+                className={attr === a.id ? 'class-btn active' : 'class-btn'}
+                style={{ textAlign: 'left', padding: '8px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: a.hue, fontSize: 14 }}>{a.icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>{a.name}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* XP + Frequency */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+          <div>
+            <label style={FIELD_LABEL}>XP por conclusão</label>
+            <input type="number" min="5" max="100" step="5" value={xp} onChange={e => setXp(e.target.value)} style={FIELD_INPUT} />
+          </div>
+          <div>
+            <label style={FIELD_LABEL}>Frequência</label>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <button onClick={() => setFreq('daily')}
+                className={freq === 'daily' ? 'class-btn active' : 'class-btn'}
+                style={{ flex: 1, padding: '8px 10px', fontSize: 12 }}>Diário</button>
+              <button onClick={() => setFreq('weekday')}
+                className={freq === 'weekday' ? 'class-btn active' : 'class-btn'}
+                style={{ flex: 1, padding: '8px 10px', fontSize: 12 }}>Seg–Sex</button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+          <button className="btn primary" onClick={submit} disabled={!canSave} style={{
+            fontSize: 13, padding: '10px 18px',
+            opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'not-allowed',
+          }}>
+            {mode === 'edit' ? 'Salvar' : 'Criar hábito'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCell({ label, value, suffix }) {
+  return (
+    <div style={{ padding: 12, background: 'var(--surface-2)', borderRadius: 8 }}>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
+        <span className="serif" style={{ fontSize: 22, color: 'var(--ink)' }}>{value}</span>
+        {suffix && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
+function Heatmap({ data, color }) {
+  const weeks = [];
+  for (let i = 0; i < data.length; i += 7) weeks.push(data.slice(i, i + 7));
+  return (
+    <div style={{ display: 'flex', gap: 3 }}>
+      {weeks.map((w, i) => (
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {w.map((v, j) => (
+            <div key={j} style={{
+              width: 14, height: 14, borderRadius: 3,
+              background: v === 1 ? color : v === null ? 'transparent' : 'var(--line)',
+              opacity: v === 1 ? 0.85 : 1,
+              border: v === null ? '1px dashed var(--line)' : 'none',
+            }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═══ screens-para.jsx ═══
+// screens-para.jsx — Projects/Areas/Resources/Archives
+
+function ParaScreen({ state, dispatch, para }) {
+  // para = 'projects' | 'areas' | 'resources' | 'archives'
+  if (para === 'projects') return <ProjectsView state={state} dispatch={dispatch} />;
+  if (para === 'areas') return <AreasView state={state} dispatch={dispatch} />;
+  if (para === 'resources') return <ResourcesView state={state} dispatch={dispatch} />;
+  if (para === 'archives') return <ArchivesView state={state} dispatch={dispatch} />;
+  return null;
+}
+
+function ProjectsView({ state, dispatch }) {
+  const [filter, setFilter] = React.useState('all');
+  const [showNew, setShowNew] = React.useState(false);
+  const projects = state.projects || [];
+  const areas = state.areas || [];
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1300, margin: '0 auto' }}>
+      <ParaHeader label="P · Projects" title="Projetos ativos" subtitle="Iniciativas com prazo e resultado definido" />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button className={`btn ${filter === 'all' ? 'primary' : ''}`} onClick={() => setFilter('all')} style={{ fontSize: 12 }}>Todos</button>
+        {areas.map(area => (
+          <button key={area.id} className={`btn ${filter === area.id ? 'primary' : ''}`} onClick={() => setFilter(area.id)} style={{ fontSize: 12 }}>
+            <span style={{ color: filter === area.id ? 'var(--bg)' : area.color }}>{area.icon}</span> {area.name}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button className="btn primary" onClick={() => setShowNew(true)} disabled={areas.length === 0}
+          style={{ opacity: areas.length === 0 ? 0.5 : 1, cursor: areas.length === 0 ? 'not-allowed' : 'pointer' }}>
+          <Icon name="plus" size={14} /> Novo projeto
+        </button>
+      </div>
+
+      {projects.length === 0 ? (
+        <div className="card" style={{ padding: 40 }}>
+          <EmptyState
+            icon="target"
+            title={areas.length === 0 ? 'Crie uma Área primeiro' : 'Nenhum projeto ainda'}
+            hint={areas.length === 0
+              ? 'Projetos vivem dentro de Áreas de responsabilidade. Crie pelo menos uma Área (ex: Saúde, Carreira, Finanças) para começar.'
+              : 'Projetos têm início, fim e um resultado concreto — ex: “lançar o MVP”, “correr uma prova de 10k”.'}
+          />
+        </div>
+      ) : (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+        {projects.filter(p => filter === 'all' || p.area === filter).map(p => {
+          const area = areas.find(a => a.id === p.area) || { color: 'var(--ink-3)', icon: '○', name: 'Sem área' };
+          const daysLeft = Math.ceil((new Date(p.due) - today) / 86400000);
+          return (
+            <div key={p.id} className="card" style={{ padding: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: area.color, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  <span>{area.icon}</span> {area.name}
+                </div>
+                <button className="btn ghost" style={{ padding: 2 }}><Icon name="dots" size={14} /></button>
+              </div>
+              <div className="serif" style={{ fontSize: 20, lineHeight: 1.25, color: 'var(--ink)', marginBottom: 12 }}>{p.name}</div>
+
+              <div className="xp-bar" style={{ height: 6 }}>
+                <div className="fill" style={{ width: `${p.progress * 100}%`, '--hue': area.color }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>
+                <span className="mono">{p.done}/{p.tasks} tarefas</span>
+                <span className="mono">{Math.round(p.progress * 100)}%</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: daysLeft < 30 ? 'var(--forca)' : 'var(--ink-3)' }}>
+                  <Icon name="clock" size={12} />
+                  <span className="mono">{daysLeft}d</span>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{new Date(p.due).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      )}
+
+      {showNew && <NewProjectModal areas={areas} onClose={() => setShowNew(false)} onCreate={(proj) => {
+        dispatch({ type: 'addProject', project: proj });
+        setShowNew(false);
+      }} />}
+    </div>
+  );
+}
+
+function NewProjectModal({ areas, onClose, onCreate }) {
+  const [name, setName] = React.useState('');
+  const [area, setArea] = React.useState(areas[0]?.id || 'a1');
+  const [due, setDue] = React.useState(() => {
+    const d = new Date(today); d.setMonth(d.getMonth() + 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [tasks, setTasks] = React.useState(10);
+  const [description, setDescription] = React.useState('');
+  const [priority, setPriority] = React.useState('medium');
+
+  const canCreate = name.trim().length >= 2;
+
+  function submit() {
+    if (!canCreate) return;
+    const proj = {
+      id: 'p' + Date.now(),
+      name: name.trim(),
+      area,
+      progress: 0,
+      due,
+      tasks: Number(tasks) || 1,
+      done: 0,
+      status: 'active',
+      description: description.trim() || undefined,
+      priority,
+      createdAt: new Date().toISOString(),
+    };
+    onCreate(proj);
+  }
+
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const selectedArea = areas.find(a => a.id === area) || areas[0] || { desc: '' };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20,
+      backdropFilter: 'blur(4px)',
+      animation: 'fadeUp 0.2s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{
+        width: '100%', maxWidth: 620, padding: 28, maxHeight: '90vh', overflow: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+          <div>
+            <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Sistema PARA · Project</div>
+            <div className="serif" style={{ fontSize: 28, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>Novo projeto</div>
+          </div>
+          <button className="btn ghost" onClick={onClose} style={{ padding: 4 }}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.5 }}>
+          Projetos têm <strong style={{ color: 'var(--ink-2)' }}>início, fim e um resultado concreto</strong>. São esforços finitos, sempre dentro de uma Área.
+        </div>
+
+        {/* Name */}
+        <div style={{ marginTop: 20 }}>
+          <label style={FIELD_LABEL}>Nome do projeto *</label>
+          <input value={name} onChange={e => setName(e.target.value)} autoFocus
+            placeholder="Ex: Lançar MVP, Aprender espanhol, Reformar cozinha…"
+            style={FIELD_INPUT} />
+        </div>
+
+        {/* Area */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Área de responsabilidade</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 6, marginTop: 6 }}>
+            {areas.map(a => (
+              <button key={a.id} onClick={() => setArea(a.id)}
+                className={area === a.id ? 'class-btn active' : 'class-btn'}
+                style={{ textAlign: 'left', padding: '8px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: a.color, fontSize: 14 }}>{a.icon}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          {selectedArea.desc && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{selectedArea.desc}</div>}
+        </div>
+
+        {/* Due date + tasks */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+          <div>
+            <label style={FIELD_LABEL}>Prazo</label>
+            <input type="date" value={due} onChange={e => setDue(e.target.value)} style={FIELD_INPUT} />
+          </div>
+          <div>
+            <label style={FIELD_LABEL}>Tarefas estimadas</label>
+            <input type="number" min="1" max="200" value={tasks} onChange={e => setTasks(e.target.value)} style={FIELD_INPUT} />
+          </div>
+        </div>
+
+        {/* Priority */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Prioridade</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            {[
+              { id: 'low',    label: 'Baixa',  color: 'var(--ink-3)' },
+              { id: 'medium', label: 'Média',  color: 'var(--sabedoria)' },
+              { id: 'high',   label: 'Alta',   color: 'var(--forca)' },
+            ].map(p => (
+              <button key={p.id} onClick={() => setPriority(p.id)}
+                className={priority === p.id ? 'class-btn active' : 'class-btn'}
+                style={{ flex: 1, padding: '8px 10px', fontSize: 12, fontWeight: 500 }}>
+                <span style={{ color: p.color, marginRight: 6 }}>●</span>{p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Description */}
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Descrição / resultado esperado <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+          <textarea value={description} onChange={e => setDescription(e.target.value)}
+            placeholder="Como é o 'pronto' desse projeto?"
+            rows={3}
+            style={{ ...FIELD_INPUT, resize: 'vertical', minHeight: 60, fontFamily: 'inherit' }} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+          <button className="btn primary" onClick={submit} disabled={!canCreate} style={{
+            fontSize: 13, padding: '10px 18px',
+            opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed',
+          }}>
+            Criar projeto
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const FIELD_LABEL = { fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 };
+const FIELD_INPUT = {
+  width: '100%', padding: '10px 12px',
+  background: 'var(--surface)', border: '1px solid var(--line)',
+  borderRadius: 8, color: 'var(--ink)', fontSize: 14,
+  fontFamily: 'inherit', outline: 'none',
+};
+
+function AreasView({ state, dispatch }) {
+  const [showNew, setShowNew] = React.useState(false);
+  const areas = state.areas || [];
+  const projects = state.projects || [];
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1300, margin: '0 auto' }}>
+      <ParaHeader label="A · Areas" title="Áreas de responsabilidade" subtitle="Domínios contínuos da sua vida" />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button className="btn primary" onClick={() => setShowNew(true)}><Icon name="plus" size={14} /> Nova área</button>
+      </div>
+      {areas.length === 0 ? (
+        <div className="card" style={{ padding: 40 }}>
+          <EmptyState
+            icon="folder"
+            title="Defina suas Áreas"
+            hint="Áreas são domínios contínuos da sua vida — Saúde, Carreira, Finanças, Relacionamentos, etc. Não têm prazo, só padrão a manter."
+            action={{ label: '+ Criar primeira área', onClick: () => setShowNew(true) }}
+          />
+        </div>
+      ) : (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+        {areas.map(a => {
+          const aProjects = projects.filter(p => p.area === a.id);
+          const avgProgress = aProjects.length ? aProjects.reduce((s, p) => s + p.progress, 0) / aProjects.length : 0;
+          return (
+            <div key={a.id} className="card" style={{ padding: 20, position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: 80, height: 80, background: `radial-gradient(circle at top right, color-mix(in oklch, ${a.color} 20%, transparent), transparent 70%)` }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: `color-mix(in oklch, ${a.color} 18%, var(--surface))`, color: a.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{a.icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div className="serif" style={{ fontSize: 20, lineHeight: 1 }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{aProjects.length} projeto{aProjects.length !== 1 ? 's' : ''}</div>
+                </div>
+                <button className="btn ghost" style={{ padding: 2 }} onClick={() => {
+                  if (confirm(`Excluir área "${a.name}"? Projetos dentro dela permanecerão, mas ficarão sem área.`)) {
+                    dispatch({ type: 'deleteArea', id: a.id });
+                  }
+                }}><Icon name="x" size={14} /></button>
+              </div>
+              {a.desc && <div style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 12, lineHeight: 1.5 }}>{a.desc}</div>}
+              {aProjects.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
+                    <span>Saúde da área</span>
+                    <span className="mono">{Math.round(avgProgress * 100)}%</span>
+                  </div>
+                  <div className="xp-bar"><div className="fill" style={{ width: `${avgProgress * 100}%`, '--hue': a.color }} /></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      )}
+      {showNew && <NewAreaModal onClose={() => setShowNew(false)} onCreate={(area) => {
+        dispatch({ type: 'addArea', area });
+        setShowNew(false);
+      }} />}
+    </div>
+  );
+}
+
+const AREA_COLORS = [
+  { color: 'var(--forca)',       name: 'Vermelho' },
+  { color: 'var(--inteligencia)',name: 'Azul' },
+  { color: 'var(--sabedoria)',   name: 'Âmbar' },
+  { color: 'var(--disciplina)',  name: 'Violeta' },
+  { color: 'var(--foco)',        name: 'Esverdeado' },
+  { color: 'var(--vitalidade)',  name: 'Verde' },
+  { color: 'var(--resiliencia)', name: 'Laranja' },
+  { color: 'var(--equilibrio)',  name: 'Turquesa' },
+];
+const AREA_ICONS = ['◆','◇','◈','◉','◎','◐','◑','◒','♥','✦','☽','⚔','⚙','⟡','✧','❖'];
+
+function NewAreaModal({ onClose, onCreate }) {
+  const [name, setName] = React.useState('');
+  const [icon, setIcon] = React.useState(AREA_ICONS[0]);
+  const [color, setColor] = React.useState(AREA_COLORS[0].color);
+  const [desc, setDesc] = React.useState('');
+  const canCreate = name.trim().length >= 2;
+
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  function submit() {
+    if (!canCreate) return;
+    onCreate({
+      id: 'a' + Date.now(),
+      name: name.trim(),
+      icon,
+      color,
+      desc: desc.trim(),
+    });
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20, backdropFilter: 'blur(4px)', animation: 'fadeUp 0.2s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 540, padding: 28, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Sistema PARA · Area</div>
+        <div className="serif" style={{ fontSize: 26, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>Nova área</div>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.5 }}>
+          Domínios da vida que você mantém <strong style={{ color: 'var(--ink-2)' }}>continuamente</strong> — sem prazo final.
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <label style={FIELD_LABEL}>Nome *</label>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)}
+            placeholder="Ex: Saúde, Carreira, Finanças, Família…" style={FIELD_INPUT} />
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Ícone</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {AREA_ICONS.map(i => (
+              <button key={i} onClick={() => setIcon(i)}
+                className={icon === i ? 'class-btn active' : 'class-btn'}
+                style={{ width: 36, height: 36, padding: 0, fontSize: 16 }}>
+                <span style={{ color }}>{i}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Cor</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {AREA_COLORS.map(c => (
+              <button key={c.color} onClick={() => setColor(c.color)}
+                className={color === c.color ? 'class-btn active' : 'class-btn'}
+                title={c.name}
+                style={{ width: 36, height: 36, padding: 0 }}>
+                <div style={{ width: 16, height: 16, borderRadius: '50%', background: c.color, margin: 'auto' }} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={FIELD_LABEL}>Descrição <span style={{ color: 'var(--ink-4)' }}>(opcional)</span></label>
+          <input value={desc} onChange={e => setDesc(e.target.value)}
+            placeholder="Qual padrão você quer manter?" style={FIELD_INPUT} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+          <button className="btn primary" onClick={submit} disabled={!canCreate}
+            style={{ fontSize: 13, padding: '10px 18px', opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed' }}>
+            Criar área
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResourcesView({ state, dispatch }) {
+  const [showNew, setShowNew] = React.useState(false);
+  const resources = state.resources || [];
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1100, margin: '0 auto' }}>
+      <ParaHeader label="R · Resources" title="Recursos & Referências" subtitle="Tópicos de interesse contínuo" />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button className="btn primary" onClick={() => setShowNew(true)}><Icon name="plus" size={14} /> Novo recurso</button>
+      </div>
+      {resources.length === 0 ? (
+        <div className="card" style={{ padding: 40 }}>
+          <EmptyState
+            icon="folder"
+            title="Sem recursos ainda"
+            hint="Recursos são tópicos de interesse contínuo — referências, artigos, notas. Ex: “Livros de Stoicismo”, “Receitas”."
+            action={{ label: '+ Criar primeiro recurso', onClick: () => setShowNew(true) }}
+          />
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          {resources.map((r, i) => (
+            <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '36px 1fr 100px 30px', alignItems: 'center', padding: '14px 20px', borderBottom: i < resources.length - 1 ? '1px solid var(--line)' : 'none' }}>
+              <Icon name="folder" size={18} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{r.name}</div>
+                {r.tag && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{r.tag}</div>}
+              </div>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.items || 0} itens</div>
+              <button className="btn ghost" style={{ padding: 2 }} onClick={() => {
+                if (confirm(`Excluir recurso "${r.name}"?`)) dispatch({ type: 'deleteResource', id: r.id });
+              }}><Icon name="x" size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {showNew && <SimpleNameModal
+        title="Novo recurso" label="R · Resource"
+        hint="Um tópico de interesse contínuo."
+        placeholder="Ex: Livros de filosofia, Receitas, Notas de design…"
+        extraField={{ label: 'Tag', placeholder: 'categoria / área (opcional)', optional: true }}
+        onClose={() => setShowNew(false)}
+        onCreate={({ name, extra }) => {
+          dispatch({ type: 'addResource', resource: { id: 'r' + Date.now(), name, tag: extra, items: 0 } });
+          setShowNew(false);
+        }}
+      />}
+    </div>
+  );
+}
+
+function ArchivesView({ state }) {
+  const archives = state.archives || [];
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1100, margin: '0 auto' }}>
+      <ParaHeader label="A · Archives" title="Arquivos" subtitle="Completados, encerrados, preservados" />
+      {archives.length === 0 ? (
+        <div className="card" style={{ padding: 40 }}>
+          <EmptyState
+            icon="archive"
+            title="Arquivo vazio"
+            hint="Projetos e recursos encerrados aparecem aqui. Nada se perde — tudo fica preservado para referência futura."
+          />
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          {archives.map((r, i) => (
+            <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '36px 1fr 120px 30px', alignItems: 'center', padding: '14px 20px', borderBottom: i < archives.length - 1 ? '1px solid var(--line)' : 'none', opacity: 0.75 }}>
+              <Icon name="archive" size={18} />
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{r.name}</div>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{r.closed}</div>
+              <Icon name="chev" size={14} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Reusable small modal for simple name + optional field
+function SimpleNameModal({ title, label, hint, placeholder, extraField, onClose, onCreate }) {
+  const [name, setName] = React.useState('');
+  const [extra, setExtra] = React.useState('');
+  const canCreate = name.trim().length >= 2;
+  React.useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20, backdropFilter: 'blur(4px)', animation: 'fadeUp 0.2s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 480, padding: 28 }}>
+        <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>{label}</div>
+        <div className="serif" style={{ fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>{title}</div>
+        {hint && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.5 }}>{hint}</div>}
+        <div style={{ marginTop: 20 }}>
+          <label style={FIELD_LABEL}>Nome *</label>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={placeholder} style={FIELD_INPUT} />
+        </div>
+        {extraField && (
+          <div style={{ marginTop: 16 }}>
+            <label style={FIELD_LABEL}>{extraField.label} {extraField.optional && <span style={{ color: 'var(--ink-4)' }}>(opcional)</span>}</label>
+            <input value={extra} onChange={e => setExtra(e.target.value)} placeholder={extraField.placeholder} style={FIELD_INPUT} />
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+          <button className="btn primary" onClick={() => canCreate && onCreate({ name: name.trim(), extra: extra.trim() })}
+            disabled={!canCreate} style={{ fontSize: 13, padding: '10px 18px', opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed' }}>
+            Criar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ParaHeader({ label, title, subtitle }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>{label}</div>
+      <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>{title}</div>
+      <div style={{ color: 'var(--ink-3)', marginTop: 6, fontSize: 14 }}>{subtitle}</div>
+    </div>
+  );
+}
+
+// ═══ screens-character.jsx ═══
+// screens-character.jsx — Character sheet (RPG)
+
+function CharacterScreen({ state }) {
+  const { attrXp } = state;
+  const totalXp = Object.values(attrXp).reduce((a, b) => a + b, 0);
+  const heroLevel = deriveLevel(totalXp);
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Character sheet</div>
+        <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Alexandre Moreira</div>
+        <div style={{ color: 'var(--ink-3)', marginTop: 6, fontSize: 14 }}>Classe: Aventureiro · Iniciado em 12 de janeiro de 2026</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 20 }}>
+        {/* Left: avatar + stats */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 24, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 30%, color-mix(in oklch, var(--accent) 18%, transparent), transparent 70%)' }} />
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                width: 120, height: 120, borderRadius: '50%', margin: '0 auto',
+                background: `linear-gradient(135deg, var(--accent), var(--accent-2))`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: 'var(--font-serif)', fontSize: 52, color: 'var(--bg)',
+                boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.2), 0 8px 24px rgba(0,0,0,0.12)',
+              }}>A</div>
+              <div className="serif" style={{ fontSize: 32, marginTop: 16, lineHeight: 1 }}>Nível {heroLevel.level}</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginTop: 4 }}>Aventureiro</div>
+
+              <div style={{ margin: '18px auto 0', maxWidth: 240 }}>
+                <div className="xp-bar thick"><div className="fill" style={{ width: `${heroLevel.progress * 100}%`, '--hue': 'var(--accent)' }} /></div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>{heroLevel.xpInLevel} / {heroLevel.xpToNext} XP</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 18 }}>
+            <div className="serif" style={{ fontSize: 18, marginBottom: 12 }}>Estatísticas gerais</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <MetricCell label="XP Total" value={totalXp.toLocaleString('pt-BR')} />
+              <MetricCell label="Hábitos ativos" value={state.habits.length} />
+              <MetricCell label="Maior streak" value={45} suffix="dias" />
+              <MetricCell label="Quests concluídas" value={7} />
+              <MetricCell label="Dias jogados" value={96} />
+              <MetricCell label="Conquistas" value="3/6" />
+            </div>
+          </div>
+        </div>
+
+        {/* Right: attributes + achievements */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div className="serif" style={{ fontSize: 22 }}>Atributos</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Barras de XP · estilo clássico</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+              {ATTRIBUTES.map(a => {
+                const lvl = deriveLevel(attrXp[a.id]);
+                return (
+                  <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr', gap: 14, alignItems: 'center' }}>
+                    <LevelBadge level={lvl.level} size={44} hue={a.hue} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{a.abbr}</div>
+                          <div className="serif" style={{ fontSize: 17, lineHeight: 1.1, color: 'var(--ink)' }}>{a.name}</div>
+                        </div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>LV {lvl.level}</div>
+                      </div>
+                      <div className="xp-bar thick"><div className="fill" style={{ width: `${lvl.progress * 100}%`, '--hue': a.hue }} /></div>
+                      <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 3, display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{lvl.xpInLevel} / {lvl.xpToNext}</span>
+                        <span>total: {attrXp[a.id].toLocaleString('pt-BR')}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Achievements */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+              <div className="serif" style={{ fontSize: 20 }}>Conquistas</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{ACHIEVEMENTS_SEED.filter(a => a.unlocked).length} / {ACHIEVEMENTS_SEED.length} desbloqueadas</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              {ACHIEVEMENTS_SEED.map(a => (
+                <div key={a.id} style={{
+                  padding: 14, borderRadius: 10,
+                  border: `1px solid ${a.unlocked ? 'color-mix(in oklch, var(--accent) 30%, var(--line))' : 'var(--line)'}`,
+                  background: a.unlocked ? `color-mix(in oklch, var(--accent) 6%, var(--surface))` : 'var(--surface-2)',
+                  opacity: a.unlocked ? 1 : 0.65,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: '50%',
+                      background: a.unlocked ? 'var(--accent)' : 'var(--line-2)',
+                      color: a.unlocked ? 'var(--bg)' : 'var(--ink-3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
+                    }}>
+                      <Icon name={a.unlocked ? 'trophy' : 'sparkle'} size={14} />
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{a.name}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{a.desc}</div>
+                  <div className="mono" style={{ fontSize: 10, color: a.unlocked ? 'var(--accent)' : 'var(--ink-4)', marginTop: 6 }}>
+                    {a.unlocked ? `Desbloqueado em ${a.date}` : `Progresso: ${a.progress}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-charts.jsx ═══
+// screens-charts.jsx — Evolution graphs
+// Supports multiple chart styles: 'line' | 'area' | 'bars'
+
+function ChartsScreen({ state, tweaks }) {
+  const [range, setRange] = React.useState(30); // days
+  const [selectedAttr, setSelectedAttr] = React.useState(null);
+
+  const data = XP_HISTORY.slice(-range);
+  const chartStyle = tweaks.chartStyle;
+
+  const totals = ATTRIBUTES.map(a => ({
+    attr: a,
+    curr: state.attrXp[a.id],
+    delta: data[data.length - 1][a.id] - data[0][a.id],
+    series: data.map(d => d[a.id]),
+  }));
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Evolução</div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Gráficos de progresso</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[7, 30, 90].map(r => (
+            <button key={r} className={`btn ${range === r ? 'primary' : ''}`} onClick={() => setRange(r)} style={{ fontSize: 12 }}>
+              {r}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Big combined chart */}
+      <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+          <div className="serif" style={{ fontSize: 20 }}>Todos os atributos</div>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+            Estilo: <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{chartStyle}</span>
+          </div>
+        </div>
+        <BigChart data={data} attrs={ATTRIBUTES} highlight={selectedAttr} style={chartStyle} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
+          {ATTRIBUTES.map(a => (
+            <div key={a.id}
+              onClick={() => setSelectedAttr(selectedAttr === a.id ? null : a.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+                border: `1px solid ${selectedAttr === a.id ? a.hue : 'var(--line)'}`,
+                borderRadius: 999, cursor: 'pointer',
+                background: selectedAttr === a.id ? `color-mix(in oklch, ${a.hue} 12%, var(--surface))` : 'var(--surface)',
+                fontSize: 12,
+              }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: a.hue }} />
+              {a.name}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Per-attribute cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+        {totals.map(({ attr, curr, delta, series }) => {
+          const lvl = deriveLevel(curr);
+          return (
+            <div key={attr.id} className="card" style={{ padding: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: attr.hue, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{attr.icon} {attr.abbr}</div>
+                  <div className="serif" style={{ fontSize: 18, lineHeight: 1.2, marginTop: 2 }}>{attr.name}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="serif" style={{ fontSize: 22, lineHeight: 1 }}>LV {lvl.level}</div>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--accent)', marginTop: 2 }}>+{Math.round(delta)} XP</div>
+                </div>
+              </div>
+              <MiniChart data={series} color={attr.hue} style={chartStyle} height={60} />
+              <div className="xp-bar" style={{ marginTop: 10 }}>
+                <div className="fill" style={{ width: `${lvl.progress * 100}%`, '--hue': attr.hue }} />
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+                <span>{lvl.xpInLevel} / {lvl.xpToNext}</span>
+                <span>{curr.toLocaleString('pt-BR')} total</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BigChart({ data, attrs, highlight, style }) {
+  const width = 1200, height = 280, pad = { l: 40, r: 20, t: 20, b: 28 };
+  const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+  if (data.length < 2) return null;
+
+  // compute total range across all attrs
+  let max = 0;
+  data.forEach(d => attrs.forEach(a => { if (d[a.id] > max) max = d[a.id]; }));
+  max = Math.ceil(max / 1000) * 1000;
+
+  const x = (i) => pad.l + (i / (data.length - 1)) * iw;
+  const y = (v) => pad.t + ih - (v / max) * ih;
+
+  const gridLines = 4;
+  const dateLabels = data.length <= 10
+    ? data.map((d, i) => ({ i, label: new Date(d.date).getDate() }))
+    : data.filter((_, i) => i % Math.ceil(data.length / 6) === 0).map((d, _, arr) => ({ i: data.indexOf(d), label: new Date(d.date).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }) }));
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      {/* grid */}
+      {Array.from({ length: gridLines + 1 }, (_, i) => {
+        const yv = pad.t + (i / gridLines) * ih;
+        return (
+          <g key={i}>
+            <line x1={pad.l} x2={pad.l + iw} y1={yv} y2={yv} stroke="var(--line)" strokeWidth="0.5" />
+            <text x={pad.l - 8} y={yv + 3} fontSize="10" fill="var(--ink-4)" textAnchor="end" fontFamily="var(--font-mono)">
+              {Math.round(max * (1 - i / gridLines)).toLocaleString('pt-BR')}
+            </text>
+          </g>
+        );
+      })}
+      {dateLabels.map(({ i, label }) => (
+        <text key={i} x={x(i)} y={height - 8} fontSize="10" fill="var(--ink-4)" textAnchor="middle" fontFamily="var(--font-mono)">{label}</text>
+      ))}
+
+      {/* series */}
+      {attrs.map(a => {
+        const series = data.map(d => d[a.id]);
+        const path = series.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+        const fillPath = `${path} L${x(series.length - 1).toFixed(1)},${pad.t + ih} L${x(0).toFixed(1)},${pad.t + ih} Z`;
+        const isHighlit = highlight === null || highlight === a.id;
+        const opacity = isHighlit ? 1 : 0.18;
+
+        if (style === 'bars') {
+          const bw = iw / series.length * 0.8 / attrs.length;
+          const attrIdx = attrs.indexOf(a);
+          return (
+            <g key={a.id} opacity={opacity}>
+              {series.map((v, i) => {
+                const bx = x(i) - (iw / series.length * 0.4) + bw * attrIdx;
+                return <rect key={i} x={bx} y={y(v)} width={bw * 0.9} height={pad.t + ih - y(v)} fill={`color-mix(in oklch, ${a.hue} 100%, transparent)`} />;
+              })}
+            </g>
+          );
+        }
+
+        return (
+          <g key={a.id} opacity={opacity}>
+            {style === 'area' && <path d={fillPath} fill={a.hue} opacity="0.08" />}
+            <path d={path} stroke={a.hue} strokeWidth={isHighlit && highlight === a.id ? 2.5 : 1.75} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function MiniChart({ data, color, style, height = 50 }) {
+  const width = 280, pad = 4;
+  if (data.length < 2) return null;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const x = (i) => pad + (i / (data.length - 1)) * (width - pad * 2);
+  const y = (v) => pad + (height - pad * 2) - ((v - min) / range) * (height - pad * 2);
+
+  if (style === 'bars') {
+    const bw = (width - pad * 2) / data.length;
+    return (
+      <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+        {data.map((v, i) => (
+          <rect key={i} x={x(i) - bw * 0.4} y={y(v)} width={bw * 0.7} height={height - pad - y(v)} fill={color} opacity="0.8" rx="1" />
+        ))}
+      </svg>
+    );
+  }
+
+  const path = data.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const fillPath = `${path} L${x(data.length - 1).toFixed(1)},${height - pad} L${x(0).toFixed(1)},${height - pad} Z`;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      {style !== 'line' && <path d={fillPath} fill={color} opacity="0.15" />}
+      <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ═══ screens-profile.jsx ═══
+// screens-profile.jsx — Profile / Stats overview
+// screens-goals.jsx — Quests page
+
+function ProfileScreen({ state }) {
+  const { attrXp } = state;
+  const totalXp = Object.values(attrXp).reduce((a, b) => a + b, 0);
+  const heroLevel = deriveLevel(totalXp);
+  const totalHabitsCompleted = Object.values(HABIT_HISTORY).flat().filter(v => v === 1).length;
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Perfil</div>
+        <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Minha jornada</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <BigStat label="XP Total" value={totalXp.toLocaleString('pt-BR')} sub="desde Jan 2026" />
+        <BigStat label="Dias consecutivos" value="96" sub="sem falhar check-in" accent />
+        <BigStat label="Hábitos batidos" value={totalHabitsCompleted.toLocaleString('pt-BR')} sub="últimos 90d" />
+        <BigStat label="Conquistas" value="3/6" sub="desbloqueadas" />
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>Dados salvos localmente</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+            Seu progresso é salvo automaticamente no navegador (localStorage).
+          </div>
+        </div>
+        <button className="btn" onClick={() => {
+          if (confirm('Apagar todos os dados salvos e voltar ao estado inicial?')) {
+            try {
+              localStorage.removeItem('evoquest:state:v1');
+              localStorage.removeItem('evoquest:tweaks:v1');
+              localStorage.removeItem('evoquest:screen');
+            } catch {}
+            location.reload();
+          }
+        }} style={{ fontSize: 12 }}>Resetar dados</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="card" style={{ padding: 20 }}>
+          <div className="serif" style={{ fontSize: 20, marginBottom: 14 }}>Distribuição de XP</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {ATTRIBUTES.map(a => {
+              const pct = (attrXp[a.id] / totalXp) * 100;
+              return (
+                <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 70px', gap: 10, alignItems: 'center', fontSize: 12 }}>
+                  <span style={{ color: 'var(--ink-2)' }}>{a.icon} {a.name}</span>
+                  <div className="xp-bar"><div className="fill" style={{ width: `${pct}%`, '--hue': a.hue }} /></div>
+                  <span className="mono" style={{ color: 'var(--ink-3)', textAlign: 'right' }}>{pct.toFixed(1)}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 20 }}>
+          <div className="serif" style={{ fontSize: 20, marginBottom: 14 }}>Linha do tempo recente</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[
+              { d: 'Hoje', t: 'Completou 4 hábitos matinais', xp: 75, attr: 'disciplina' },
+              { d: 'Ontem', t: 'Deep work: 3h20 de foco', xp: 60, attr: 'foco' },
+              { d: '15 abr', t: 'Desbloqueou "Chama Eterna"', xp: 200, attr: 'resiliencia', ach: true },
+              { d: '14 abr', t: 'Corrida 10km em 52min', xp: 80, attr: 'vitalidade' },
+              { d: '12 abr', t: 'Leu "Thinking in Systems"', xp: 100, attr: 'inteligencia' },
+            ].map((ev, i) => {
+              const attr = ATTRIBUTES.find(a => a.id === ev.attr);
+              return (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: 10, alignItems: 'center' }}>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{ev.d}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    {ev.ach && <Icon name="trophy" size={14} />}
+                    <span style={{ color: 'var(--ink)' }}>{ev.t}</span>
+                  </div>
+                  <span className="mono" style={{ fontSize: 11, color: attr.hue, fontWeight: 600 }}>+{ev.xp}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BigStat({ label, value, sub, accent }) {
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{label}</div>
+      <div className="serif" style={{ fontSize: 32, lineHeight: 1, marginTop: 6, color: accent ? 'var(--accent)' : 'var(--ink)' }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>{sub}</div>
+    </div>
+  );
+}
+
+// Goals / Quests
+function GoalsScreen({ state }) {
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1300, margin: '0 auto' }}>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>Quests</div>
+        <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>Objetivos & Missões</div>
+        <div style={{ color: 'var(--ink-3)', marginTop: 6, fontSize: 14 }}>Metas de longo prazo com recompensa em XP</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+        {state.quests.map(q => {
+          const attr = ATTRIBUTES.find(a => a.id === q.attr);
+          const pct = (q.progress / q.target) * 100;
+          return (
+            <div key={q.id} className="card" style={{ padding: 20, position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: 100, height: 100, background: `radial-gradient(circle at top right, color-mix(in oklch, ${attr.hue} 20%, transparent), transparent 70%)` }} />
+              <div style={{ position: 'relative' }}>
+                <div style={{ fontSize: 11, color: attr.hue, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{attr.icon} Quest · {attr.name}</div>
+                <div className="serif" style={{ fontSize: 22, marginTop: 6, lineHeight: 1.2 }}>{q.name}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 16 }}>
+                  <span className="serif" style={{ fontSize: 32, lineHeight: 1 }}>{q.progress}</span>
+                  <span style={{ color: 'var(--ink-3)', fontSize: 14 }}>/ {q.target}</span>
+                  <span className="mono" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>{pct.toFixed(0)}%</span>
+                </div>
+                <div className="xp-bar thick" style={{ marginTop: 10 }}>
+                  <div className="fill" style={{ width: `${pct}%`, '--hue': attr.hue }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14, fontSize: 12 }}>
+                  <span style={{ color: 'var(--ink-3)' }}>Recompensa</span>
+                  <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>+{q.xp} XP</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-workout.jsx ═══
+// screens-workout.jsx — Workout builder (Funcional + Musculação)
+
+function WorkoutScreen({ state, dispatch }) {
+  const [selectedWId, setSelectedWId] = React.useState(state.workouts[0].id);
+  const [filter, setFilter] = React.useState('all'); // all | musc | func | cardio | mob
+  const [showLibrary, setShowLibrary] = React.useState(false);
+  const [libGroup, setLibGroup] = React.useState('all');
+  const [libQuery, setLibQuery] = React.useState('');
+
+  const workout = state.workouts.find(w => w.id === selectedWId);
+  const totalSets = workout.exercises.reduce((a, e) => a + e.sets, 0);
+  const doneCount = workout.exercises.filter(e => e.done).length;
+  const progress = workout.exercises.length ? doneCount / workout.exercises.length : 0;
+
+  // week volume
+  const weekVolume = state.workouts.reduce((acc, w) => {
+    acc.totalSets += w.exercises.reduce((a, e) => a + e.sets, 0);
+    acc.totalMin += w.durationMin;
+    return acc;
+  }, { totalSets: 0, totalMin: 0 });
+
+  const kindColor = {
+    musc:   'var(--forca)',
+    func:   'var(--resiliencia)',
+    cardio: 'var(--vitalidade)',
+    mob:    'var(--equilibrio)',
+  };
+  const kindLabel = { musc: 'Musculação', func: 'Funcional', cardio: 'Cardio', mob: 'Mobilidade' };
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* Hero */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 24, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 280 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>
+            Treino · Mesociclo de hipertrofia
+          </div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>
+            Plano semanal
+          </div>
+          <div style={{ color: 'var(--ink-3)', marginTop: 6, fontSize: 14 }}>
+            {state.workouts.length} sessões · {weekVolume.totalSets} séries totais · {Math.round(weekVolume.totalMin / 60 * 10) / 10}h/sem
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12 }}>
+          <StatCard label="Peso atual" value="78.4" unit="kg" delta="-1.2 kg" deltaPositive={true} />
+          <StatCard label="Volume sem." value={weekVolume.totalSets} unit="séries" delta="+18 vs sem -1" deltaPositive={true} />
+          <StatCard label="PR Supino" value="80" unit="kg" delta="+5 kg" deltaPositive={true} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20 }}>
+        {/* Left: week plan */}
+        <div className="card" style={{ padding: 16, alignSelf: 'start' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
+            Semana — 13 a 19 de abril
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {state.workouts.map(w => {
+              const done = w.exercises.filter(e => e.done).length;
+              const total = w.exercises.length;
+              const prog = total ? done / total : 0;
+              const isSel = w.id === selectedWId;
+              return (
+                <div key={w.id}
+                  onClick={() => setSelectedWId(w.id)}
+                  style={{
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    background: isSel ? 'var(--surface-2)' : 'transparent',
+                    borderLeft: `3px solid ${isSel ? kindColor[w.kind] : 'transparent'}`,
+                    transition: 'background 0.12s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{w.day}</div>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{done}/{total}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500, marginBottom: 4 }}>
+                    {w.label.split(' — ')[0]}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 6 }}>
+                    {kindLabel[w.kind]} · {w.durationMin}min
+                  </div>
+                  <div className="xp-bar" style={{ height: 3 }}>
+                    <div className="fill" style={{ width: `${prog * 100}%`, '--hue': kindColor[w.kind] }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 8 }}>
+              Distribuição
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {['musc', 'func', 'cardio', 'mob'].map(k => {
+                const count = state.workouts.filter(w => w.kind === k).length;
+                const pct = count / state.workouts.length;
+                return (
+                  <div key={k} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 2 }}>{kindLabel[k]}</div>
+                      <div className="xp-bar" style={{ height: 4 }}>
+                        <div className="fill" style={{ width: `${pct * 100}%`, '--hue': kindColor[k] }} />
+                      </div>
+                    </div>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: workout detail */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div className="card" style={{ padding: 24 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: kindColor[workout.kind], color: 'var(--bg)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    {kindLabel[workout.kind]}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{workout.day}</span>
+                </div>
+                <div className="serif" style={{ fontSize: 26, lineHeight: 1.2 }}>{workout.label}</div>
+                <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 6 }}>
+                  {workout.exercises.length} exercícios · {totalSets} séries · ~{workout.durationMin}min
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 160 }}>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 4 }}>
+                  Progresso
+                </div>
+                <div className="serif" style={{ fontSize: 28, lineHeight: 1, color: kindColor[workout.kind] }}>
+                  {doneCount}<span style={{ color: 'var(--ink-3)', fontSize: 18 }}>/{workout.exercises.length}</span>
+                </div>
+                <div style={{ width: 160, marginTop: 8 }}>
+                  <div className="xp-bar" style={{ height: 6 }}>
+                    <div className="fill" style={{ width: `${progress * 100}%`, '--hue': kindColor[workout.kind] }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Exercise table */}
+            <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '28px 2.5fr 80px 90px 100px 80px 28px', padding: '10px 14px', background: 'var(--surface-2)', fontSize: 10, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <div></div>
+                <div>Exercício</div>
+                <div style={{ textAlign: 'center' }}>Séries</div>
+                <div style={{ textAlign: 'center' }}>Reps</div>
+                <div style={{ textAlign: 'center' }}>Carga</div>
+                <div style={{ textAlign: 'center' }}>Desc.</div>
+                <div></div>
+              </div>
+              {workout.exercises.map((ex, idx) => {
+                const meta = EXERCISE_LIB.find(e => e.id === ex.exId);
+                const group = MUSCLE_GROUPS.find(g => g.id === meta?.group);
+                return (
+                  <div key={idx} style={{
+                    display: 'grid', gridTemplateColumns: '28px 2.5fr 80px 90px 100px 80px 28px',
+                    padding: '12px 14px', alignItems: 'center',
+                    borderTop: idx > 0 ? '1px solid var(--line)' : 'none',
+                    background: ex.done ? 'color-mix(in oklch, var(--surface-2), var(--bg) 40%)' : 'transparent',
+                    opacity: ex.done ? 0.65 : 1,
+                  }}>
+                    <Checkbox checked={ex.done} onChange={() => dispatch({ type: 'toggleExercise', wId: workout.id, idx })} />
+                    <div>
+                      <div style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500, textDecoration: ex.done ? 'line-through' : 'none' }}>
+                        {meta?.name || 'Exercício'}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center' }}>
+                        <span style={{ fontSize: 10, color: group?.hue, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          ● {group?.name}
+                        </span>
+                      </div>
+                    </div>
+                    <EditCell
+                      value={ex.sets}
+                      align="center"
+                      onSave={(v) => dispatch({ type: 'updateExercise', wId: workout.id, idx, field: 'sets', value: parseInt(v) || 0 })}
+                    />
+                    <EditCell
+                      value={ex.reps}
+                      align="center"
+                      onSave={(v) => dispatch({ type: 'updateExercise', wId: workout.id, idx, field: 'reps', value: v })}
+                    />
+                    <EditCell
+                      value={ex.load}
+                      align="center"
+                      onSave={(v) => dispatch({ type: 'updateExercise', wId: workout.id, idx, field: 'load', value: v })}
+                    />
+                    <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)' }} className="mono">
+                      {ex.rest}s
+                    </div>
+                    <button
+                      onClick={() => dispatch({ type: 'removeExercise', wId: workout.id, idx })}
+                      style={{ background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent-2)'}
+                      onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setShowLibrary(true)}
+              className="btn"
+              style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+            >
+              <Icon name="plus" size={12} /> Adicionar exercício
+            </button>
+          </div>
+
+          {/* Muscle distribution + tips */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
+                Volume por grupo · esta sessão
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(() => {
+                  const groupSets = {};
+                  workout.exercises.forEach(ex => {
+                    const meta = EXERCISE_LIB.find(e => e.id === ex.exId);
+                    if (!meta) return;
+                    groupSets[meta.group] = (groupSets[meta.group] || 0) + ex.sets;
+                  });
+                  const max = Math.max(1, ...Object.values(groupSets));
+                  return Object.entries(groupSets).map(([gid, sets]) => {
+                    const g = MUSCLE_GROUPS.find(m => m.id === gid);
+                    return (
+                      <div key={gid} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 30px', gap: 10, alignItems: 'center' }}>
+                        <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{g?.name}</div>
+                        <div className="xp-bar" style={{ height: 8 }}>
+                          <div className="fill" style={{ width: `${(sets / max) * 100}%`, '--hue': g?.hue }} />
+                        </div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'right' }}>{sets}</div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
+                Próximos PRs esperados
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <PRRow name="Supino reto" current="80kg" target="85kg" weeks={3} />
+                <PRRow name="Agachamento" current="100kg" target="110kg" weeks={4} />
+                <PRRow name="Barra fixa" current="+10kg" target="+15kg" weeks={5} />
+                <PRRow name="Stiff" current="60kg" target="70kg" weeks={3} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showLibrary && (
+        <ExerciseLibraryModal
+          onClose={() => setShowLibrary(false)}
+          onAdd={(exId) => dispatch({ type: 'addExercise', wId: workout.id, exId })}
+          libGroup={libGroup}
+          setLibGroup={setLibGroup}
+          libQuery={libQuery}
+          setLibQuery={setLibQuery}
+        />
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, unit, delta, deltaPositive }) {
+  return (
+    <div className="card" style={{ padding: '12px 18px', minWidth: 130 }}>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
+        <div className="serif" style={{ fontSize: 24, lineHeight: 1 }}>{value}</div>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{unit}</div>
+      </div>
+      <div style={{ fontSize: 10, color: deltaPositive ? 'var(--good)' : 'var(--ink-3)', marginTop: 4, fontWeight: 500 }}>
+        {delta}
+      </div>
+    </div>
+  );
+}
+
+function EditCell({ value, onSave, align = 'left' }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(value);
+  React.useEffect(() => { setDraft(value); }, [value]);
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { onSave(draft); setEditing(false); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { onSave(draft); setEditing(false); } if (e.key === 'Escape') setEditing(false); }}
+        className="mono"
+        style={{
+          width: '100%', padding: '4px 6px', border: '1px solid var(--accent)',
+          borderRadius: 4, fontSize: 12, textAlign: align, background: 'var(--bg)', color: 'var(--ink)',
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      className="mono"
+      style={{
+        fontSize: 12, color: 'var(--ink)', textAlign: align, cursor: 'text',
+        padding: '4px 6px', borderRadius: 4, transition: 'background 0.12s',
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-2)'}
+      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+    >
+      {value}
+    </div>
+  );
+}
+
+function PRRow({ name, current, target, weeks }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+      <div>
+        <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500 }}>{name}</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+          <span className="mono">{current}</span> <span style={{ opacity: 0.5 }}>→</span> <span className="mono" style={{ color: 'var(--accent)' }}>{target}</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'right' }}>
+        <div className="mono" style={{ fontSize: 14, color: 'var(--ink)' }}>{weeks}</div>
+        <div>semanas</div>
+      </div>
+    </div>
+  );
+}
+
+function ExerciseLibraryModal({ onClose, onAdd, libGroup, setLibGroup, libQuery, setLibQuery }) {
+  const filtered = EXERCISE_LIB.filter(ex => {
+    if (libGroup !== 'all' && ex.group !== libGroup) return false;
+    if (libQuery && !ex.name.toLowerCase().includes(libQuery.toLowerCase())) return false;
+    return true;
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width: 600, maxHeight: '80vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
+          <div className="serif" style={{ fontSize: 22, marginBottom: 10 }}>Biblioteca de exercícios</div>
+          <input
+            value={libQuery}
+            onChange={(e) => setLibQuery(e.target.value)}
+            placeholder="Buscar exercício..."
+            style={{
+              width: '100%', padding: '8px 12px', border: '1px solid var(--line)',
+              borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--ink)',
+              fontFamily: 'var(--font-sans)', outline: 'none',
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, padding: '12px 22px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+          {['all', ...MUSCLE_GROUPS.map(g => g.id)].map(gid => {
+            const g = MUSCLE_GROUPS.find(m => m.id === gid);
+            const isSel = libGroup === gid;
+            return (
+              <button
+                key={gid}
+                onClick={() => setLibGroup(gid)}
+                style={{
+                  padding: '4px 10px', borderRadius: 20, fontSize: 11,
+                  border: `1px solid ${isSel ? (g?.hue || 'var(--accent)') : 'var(--line)'}`,
+                  background: isSel ? (g?.hue || 'var(--accent)') : 'transparent',
+                  color: isSel ? 'var(--bg)' : 'var(--ink-2)',
+                  cursor: 'pointer', fontWeight: 500,
+                }}
+              >
+                {gid === 'all' ? 'Todos' : g?.name}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>Nenhum exercício encontrado</div>
+          ) : filtered.map(ex => {
+            const g = MUSCLE_GROUPS.find(m => m.id === ex.group);
+            return (
+              <div
+                key={ex.id}
+                onClick={() => { onAdd(ex.id); onClose(); }}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '10px 22px', cursor: 'pointer', borderBottom: '1px solid var(--line)',
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                <div>
+                  <div style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500 }}>{ex.name}</div>
+                  <div style={{ fontSize: 11, marginTop: 2, display: 'flex', gap: 10 }}>
+                    <span style={{ color: g?.hue, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>● {g?.name}</span>
+                    <span style={{ color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      {ex.kind === 'musc' ? 'Musculação' : ex.kind === 'func' ? 'Funcional' : ex.kind === 'cardio' ? 'Cardio' : 'Mobilidade'}
+                    </span>
+                  </div>
+                </div>
+                <Icon name="plus" size={14} />
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ padding: '12px 22px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-diet.jsx ═══
+// screens-diet.jsx — Diet builder with macros, meals, water
+
+function DietScreen({ state, dispatch }) {
+  const [selectedMId, setSelectedMId] = React.useState(state.meals[0].id);
+  const [showFoodLib, setShowFoodLib] = React.useState(false);
+  const [libCat, setLibCat] = React.useState('all');
+  const [libQuery, setLibQuery] = React.useState('');
+
+  const meal = state.meals.find(m => m.id === selectedMId);
+
+  // Daily totals
+  const dayTotals = state.meals.reduce((acc, m) => {
+    const t = mealTotals(m);
+    acc.kcal += t.kcal; acc.p += t.p; acc.c += t.c; acc.f += t.f;
+    return acc;
+  }, { kcal: 0, p: 0, c: 0, f: 0 });
+
+  const mealT = mealTotals(meal);
+
+  const catLabel = { proteina: 'Proteínas', carbo: 'Carboidratos', gordura: 'Gorduras', veg: 'Vegetais' };
+  const catColor = {
+    proteina: 'var(--resiliencia)',
+    carbo:    'var(--foco)',
+    gordura:  'var(--sabedoria)',
+    veg:      'var(--equilibrio)',
+  };
+
+  return (
+    <div style={{ padding: '28px 40px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* Hero */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 24, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 280 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500 }}>
+            Dieta · Cutting 2026
+          </div>
+          <div className="serif" style={{ fontSize: 40, lineHeight: 1.1, marginTop: 4 }}>
+            Plano alimentar
+          </div>
+          <div style={{ color: 'var(--ink-3)', marginTop: 6, fontSize: 14 }}>
+            Meta: <span className="mono">{DIET_GOALS.kcal}</span> kcal · {state.meals.length} refeições · {DIET_GOALS.p}g P / {DIET_GOALS.c}g C / {DIET_GOALS.f}g G
+          </div>
+        </div>
+
+        {/* Day macro summary */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+          <MacroRing
+            label="Calorias"
+            value={dayTotals.kcal}
+            goal={DIET_GOALS.kcal}
+            unit="kcal"
+            hue="var(--accent)"
+            size={88}
+          />
+          <MacroStack
+            totals={dayTotals}
+            goals={DIET_GOALS}
+            catColor={catColor}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr 320px', gap: 20 }}>
+        {/* Left: meals list */}
+        <div className="card" style={{ padding: 16, alignSelf: 'start' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
+            Refeições do dia
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {state.meals.map(m => {
+              const t = mealTotals(m);
+              const isSel = m.id === selectedMId;
+              const pctOfDay = dayTotals.kcal ? (t.kcal / dayTotals.kcal) * 100 : 0;
+              return (
+                <div key={m.id}
+                  onClick={() => setSelectedMId(m.id)}
+                  style={{
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    background: isSel ? 'var(--surface-2)' : 'transparent',
+                    borderLeft: `3px solid ${isSel ? 'var(--accent)' : 'transparent'}`,
+                    transition: 'background 0.12s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500 }}>{m.name}</div>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{m.time}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                      {m.items.length} itens · <span className="mono">{t.kcal}</span> kcal
+                    </div>
+                  </div>
+                  <div className="xp-bar" style={{ height: 3, marginTop: 6 }}>
+                    <div className="fill" style={{ width: `${pctOfDay}%`, '--hue': 'var(--accent)' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+            <button className="btn" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }}>
+              <Icon name="plus" size={12} /> Adicionar refeição
+            </button>
+          </div>
+
+          {/* Water tracker */}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500 }}>
+                Água
+              </div>
+              <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                {state.waterToday}/{DIET_GOALS.water}ml
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 4, marginBottom: 10 }}>
+              {Array.from({ length: 8 }).map((_, i) => {
+                const filled = state.waterToday >= (i + 1) * 375;
+                return (
+                  <div key={i}
+                    onClick={() => dispatch({ type: 'addWater', amount: filled ? -375 : 375 })}
+                    style={{
+                      height: 24, borderRadius: 4,
+                      background: filled ? 'var(--foco)' : 'var(--surface-2)',
+                      border: '1px solid var(--line)',
+                      cursor: 'pointer', transition: 'background 0.15s',
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button className="btn" style={{ flex: 1, fontSize: 11, padding: '4px 8px', justifyContent: 'center' }} onClick={() => dispatch({ type: 'addWater', amount: 250 })}>+250ml</button>
+              <button className="btn" style={{ flex: 1, fontSize: 11, padding: '4px 8px', justifyContent: 'center' }} onClick={() => dispatch({ type: 'addWater', amount: 500 })}>+500ml</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Center: meal detail */}
+        <div className="card" style={{ padding: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: 'var(--accent)', color: 'var(--bg)', fontWeight: 600, letterSpacing: '0.04em' }}>
+                  {meal.time}
+                </span>
+              </div>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.2 }}>{meal.name}</div>
+              <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 6 }}>
+                {meal.items.length} itens · <span className="mono">{mealT.kcal}</span> kcal
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <MacroPill label="P" value={mealT.p.toFixed(0)} color={catColor.proteina} />
+              <MacroPill label="C" value={mealT.c.toFixed(0)} color={catColor.carbo} />
+              <MacroPill label="G" value={mealT.f.toFixed(0)} color={catColor.gordura} />
+            </div>
+          </div>
+
+          {/* Food items */}
+          <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 110px 60px 60px 60px 60px 28px', padding: '10px 14px', background: 'var(--surface-2)', fontSize: 10, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div>Alimento</div>
+              <div style={{ textAlign: 'center' }}>Qtd</div>
+              <div style={{ textAlign: 'right' }}>Kcal</div>
+              <div style={{ textAlign: 'right' }}>P</div>
+              <div style={{ textAlign: 'right' }}>C</div>
+              <div style={{ textAlign: 'right' }}>G</div>
+              <div></div>
+            </div>
+            {meal.items.map((item, idx) => {
+              const food = FOOD_LIB.find(f => f.id === item.foodId);
+              const m = foodMacros(item.foodId, item.qty);
+              return (
+                <div key={idx} style={{
+                  display: 'grid', gridTemplateColumns: '2.5fr 110px 60px 60px 60px 60px 28px',
+                  padding: '10px 14px', alignItems: 'center',
+                  borderTop: idx > 0 ? '1px solid var(--line)' : 'none',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500 }}>{food?.name}</div>
+                    <div style={{ fontSize: 11, color: catColor[food?.cat], marginTop: 2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      ● {catLabel[food?.cat]}
+                      {item.note && <span style={{ color: 'var(--ink-3)', fontWeight: 400, marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>· {item.note}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'center' }}>
+                    <QtyInput
+                      value={item.qty}
+                      unit={food?.unit}
+                      onChange={(v) => dispatch({ type: 'updateFoodQty', mId: meal.id, idx, qty: v })}
+                    />
+                  </div>
+                  <div className="mono" style={{ textAlign: 'right', fontSize: 13, color: 'var(--ink)' }}>{m.kcal}</div>
+                  <div className="mono" style={{ textAlign: 'right', fontSize: 12, color: 'var(--ink-3)' }}>{m.p.toFixed(0)}</div>
+                  <div className="mono" style={{ textAlign: 'right', fontSize: 12, color: 'var(--ink-3)' }}>{m.c.toFixed(0)}</div>
+                  <div className="mono" style={{ textAlign: 'right', fontSize: 12, color: 'var(--ink-3)' }}>{m.f.toFixed(0)}</div>
+                  <button
+                    onClick={() => dispatch({ type: 'removeFood', mId: meal.id, idx })}
+                    style={{ background: 'none', border: 'none', color: 'var(--ink-4)', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent-2)'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              );
+            })}
+            {/* totals row */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '2.5fr 110px 60px 60px 60px 60px 28px',
+              padding: '10px 14px', alignItems: 'center',
+              borderTop: '1px solid var(--line)',
+              background: 'var(--surface-2)',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</div>
+              <div></div>
+              <div className="mono" style={{ textAlign: 'right', fontSize: 14, color: 'var(--ink)', fontWeight: 600 }}>{mealT.kcal}</div>
+              <div className="mono" style={{ textAlign: 'right', fontSize: 13, color: catColor.proteina, fontWeight: 600 }}>{mealT.p.toFixed(0)}</div>
+              <div className="mono" style={{ textAlign: 'right', fontSize: 13, color: catColor.carbo, fontWeight: 600 }}>{mealT.c.toFixed(0)}</div>
+              <div className="mono" style={{ textAlign: 'right', fontSize: 13, color: catColor.gordura, fontWeight: 600 }}>{mealT.f.toFixed(0)}</div>
+              <div></div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowFoodLib(true)}
+            className="btn"
+            style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+          >
+            <Icon name="plus" size={12} /> Adicionar alimento
+          </button>
+        </div>
+
+        {/* Right: day summary */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignSelf: 'start' }}>
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 14 }}>
+              Metas do dia
+            </div>
+            <MacroGoal label="Calorias" value={dayTotals.kcal} goal={DIET_GOALS.kcal} unit="kcal" hue="var(--accent)" />
+            <MacroGoal label="Proteína" value={Math.round(dayTotals.p)} goal={DIET_GOALS.p} unit="g" hue={catColor.proteina} />
+            <MacroGoal label="Carboidrato" value={Math.round(dayTotals.c)} goal={DIET_GOALS.c} unit="g" hue={catColor.carbo} />
+            <MacroGoal label="Gordura" value={Math.round(dayTotals.f)} goal={DIET_GOALS.f} unit="g" hue={catColor.gordura} />
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 14 }}>
+              Distribuição por refeição
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {state.meals.map(m => {
+                const t = mealTotals(m);
+                const pct = dayTotals.kcal ? t.kcal / dayTotals.kcal : 0;
+                return (
+                  <div key={m.id}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--ink-2)' }}>{m.name}</span>
+                      <span className="mono" style={{ color: 'var(--ink-3)', fontSize: 11 }}>{t.kcal} kcal · {Math.round(pct * 100)}%</span>
+                    </div>
+                    <div className="xp-bar" style={{ height: 4 }}>
+                      <div className="fill" style={{ width: `${pct * 100}%`, '--hue': 'var(--accent)' }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
+              Balanço calórico
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--ink-2)' }}>Meta</span>
+                <span className="mono" style={{ color: 'var(--ink)' }}>{DIET_GOALS.kcal} kcal</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--ink-2)' }}>Consumido</span>
+                <span className="mono" style={{ color: 'var(--ink)' }}>{dayTotals.kcal} kcal</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>Restante</span>
+                <span className="mono" style={{ color: (DIET_GOALS.kcal - dayTotals.kcal) >= 0 ? 'var(--good)' : 'var(--accent-2)', fontWeight: 600 }}>
+                  {DIET_GOALS.kcal - dayTotals.kcal} kcal
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showFoodLib && (
+        <FoodLibraryModal
+          onClose={() => setShowFoodLib(false)}
+          onAdd={(foodId) => dispatch({ type: 'addFood', mId: meal.id, foodId })}
+          libCat={libCat}
+          setLibCat={setLibCat}
+          libQuery={libQuery}
+          setLibQuery={setLibQuery}
+          catLabel={catLabel}
+          catColor={catColor}
+        />
+      )}
+    </div>
+  );
+}
+
+function QtyInput({ value, unit, onChange }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(value);
+  React.useEffect(() => { setDraft(value); }, [value]);
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(parseFloat(e.target.value) || 0)}
+        onBlur={() => { onChange(draft); setEditing(false); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { onChange(draft); setEditing(false); } }}
+        className="mono"
+        style={{
+          width: 90, padding: '4px 6px', border: '1px solid var(--accent)',
+          borderRadius: 4, fontSize: 12, textAlign: 'center',
+          background: 'var(--bg)', color: 'var(--ink)',
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      className="mono"
+      style={{
+        fontSize: 12, color: 'var(--ink)', cursor: 'text', padding: '4px 8px',
+        borderRadius: 4, transition: 'background 0.12s', whiteSpace: 'nowrap',
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-2)'}
+      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+    >
+      {value} {unit}
+    </div>
+  );
+}
+
+function MacroRing({ label, value, goal, unit, hue, size = 80 }) {
+  const pct = Math.min(1, value / goal);
+  const r = size / 2 - 6;
+  const circ = 2 * Math.PI * r;
+  return (
+    <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--line)" strokeWidth="5" fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={hue} strokeWidth="5" fill="none"
+          strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)}
+          strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.4s' }}
+        />
+      </svg>
+      <div>
+        <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+        <div className="serif" style={{ fontSize: 26, lineHeight: 1, marginTop: 4 }}>{value}</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 3 }}>
+          de <span className="mono">{goal}</span> {unit}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MacroStack({ totals, goals, catColor }) {
+  const macros = [
+    { id: 'p', label: 'Proteína', value: totals.p, goal: goals.p, hue: catColor.proteina },
+    { id: 'c', label: 'Carbo',    value: totals.c, goal: goals.c, hue: catColor.carbo },
+    { id: 'f', label: 'Gordura',  value: totals.f, goal: goals.f, hue: catColor.gordura },
+  ];
+  return (
+    <div className="card" style={{ padding: '12px 16px', minWidth: 240 }}>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+        Macros do dia
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {macros.map(m => {
+          const pct = Math.min(1, m.value / m.goal);
+          return (
+            <div key={m.id} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 60px', gap: 8, alignItems: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-2)' }}>{m.label}</div>
+              <div className="xp-bar" style={{ height: 6 }}>
+                <div className="fill" style={{ width: `${pct * 100}%`, '--hue': m.hue }} />
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)', textAlign: 'right' }}>
+                {Math.round(m.value)}/{m.goal}g
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MacroPill({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 50 }}>
+      <div className="serif" style={{ fontSize: 22, lineHeight: 1, color }}>{value}</div>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 4 }}>
+        {label}g
+      </div>
+    </div>
+  );
+}
+
+function MacroGoal({ label, value, goal, unit, hue }) {
+  const pct = Math.min(1.2, value / goal);
+  const over = pct > 1;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'baseline' }}>
+        <span style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 500 }}>{label}</span>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+          <span style={{ color: over ? 'var(--accent-2)' : 'var(--ink)', fontWeight: 600 }}>{value}</span>
+          /{goal} {unit}
+        </span>
+      </div>
+      <div className="xp-bar" style={{ height: 6 }}>
+        <div className="fill" style={{
+          width: `${Math.min(100, pct * 100)}%`,
+          '--hue': over ? 'var(--accent-2)' : hue,
+        }} />
+      </div>
+    </div>
+  );
+}
+
+function FoodLibraryModal({ onClose, onAdd, libCat, setLibCat, libQuery, setLibQuery, catLabel, catColor }) {
+  const filtered = FOOD_LIB.filter(f => {
+    if (libCat !== 'all' && f.cat !== libCat) return false;
+    if (libQuery && !f.name.toLowerCase().includes(libQuery.toLowerCase())) return false;
+    return true;
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width: 600, maxHeight: '80vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
+          <div className="serif" style={{ fontSize: 22, marginBottom: 10 }}>Biblioteca de alimentos</div>
+          <input
+            value={libQuery}
+            onChange={(e) => setLibQuery(e.target.value)}
+            placeholder="Buscar alimento..."
+            style={{
+              width: '100%', padding: '8px 12px', border: '1px solid var(--line)',
+              borderRadius: 6, fontSize: 13, background: 'var(--bg)', color: 'var(--ink)',
+              fontFamily: 'var(--font-sans)', outline: 'none',
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, padding: '12px 22px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+          {['all', 'proteina', 'carbo', 'gordura', 'veg'].map(c => {
+            const isSel = libCat === c;
+            const color = c === 'all' ? 'var(--accent)' : catColor[c];
+            return (
+              <button
+                key={c}
+                onClick={() => setLibCat(c)}
+                style={{
+                  padding: '4px 10px', borderRadius: 20, fontSize: 11,
+                  border: `1px solid ${isSel ? color : 'var(--line)'}`,
+                  background: isSel ? color : 'transparent',
+                  color: isSel ? 'var(--bg)' : 'var(--ink-2)',
+                  cursor: 'pointer', fontWeight: 500,
+                }}
+              >
+                {c === 'all' ? 'Todos' : catLabel[c]}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>Nenhum alimento encontrado</div>
+          ) : filtered.map(f => (
+            <div
+              key={f.id}
+              onClick={() => { onAdd(f.id); onClose(); }}
+              style={{
+                display: 'grid', gridTemplateColumns: '1fr 80px 60px 60px 60px', gap: 12,
+                alignItems: 'center', padding: '10px 22px', cursor: 'pointer', borderBottom: '1px solid var(--line)',
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <div>
+                <div style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500 }}>{f.name}</div>
+                <div style={{ fontSize: 10, marginTop: 2, color: catColor[f.cat], fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  ● {catLabel[f.cat]}
+                </div>
+              </div>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'right' }}>
+                {f.base}{f.unit}
+              </div>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--ink)', textAlign: 'right' }}>
+                {f.kcal}<span style={{ color: 'var(--ink-3)', fontSize: 10 }}>kcal</span>
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'right' }}>
+                P{f.p.toFixed(0)} C{f.c.toFixed(0)}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Icon name="plus" size={14} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ padding: '12px 22px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-mobile.jsx ═══
+// screens-mobile.jsx — Mobile companion view (iPhone frame)
+
+function MobileApp({ state, dispatch, tweaks }) {
+  const [tab, setTab] = React.useState('home');
+  const { attrXp } = state;
+  const totalXp = Object.values(attrXp).reduce((a, b) => a + b, 0);
+  const heroLevel = deriveLevel(totalXp);
+
+  return (
+    <IOSDevice width={390} height={844} dark={tweaks.theme === 'ink'}>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+        {/* Top bar */}
+        <div style={{ padding: '62px 20px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+              17 abr, sex
+            </div>
+            <div className="serif" style={{ fontSize: 22, lineHeight: 1.1, marginTop: 2 }}>
+              {tab === 'home' ? 'Hoje' : tab === 'habits' ? 'Hábitos' : tab === 'para' ? 'PARA' : 'Stats'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <LevelBadge level={heroLevel.level} size={32} hue="var(--accent)" />
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 16px 100px' }}>
+          {tab === 'home' && <MobileHome state={state} dispatch={dispatch} heroLevel={heroLevel} />}
+          {tab === 'habits' && <MobileHabits state={state} dispatch={dispatch} />}
+          {tab === 'para' && <MobilePara />}
+          {tab === 'stats' && <MobileStats state={state} />}
+        </div>
+
+        {/* Tab bar */}
+        <div style={{
+          position: 'absolute', left: 14, right: 14, bottom: 30,
+          borderRadius: 22, padding: 6,
+          background: 'color-mix(in oklch, var(--surface) 85%, transparent)',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          border: '1px solid var(--line)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+          display: 'flex', gap: 4,
+        }}>
+          {[
+            { id: 'home', label: 'Hoje', icon: 'home' },
+            { id: 'habits', label: 'Hábitos', icon: 'habit' },
+            { id: 'para', label: 'PARA', icon: 'folder' },
+            { id: 'stats', label: 'Stats', icon: 'chart' },
+          ].map(t => {
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                flex: 1, padding: '8px 6px', borderRadius: 16,
+                background: active ? 'var(--accent-2)' : 'transparent',
+                color: active ? 'var(--bg)' : 'var(--ink-3)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              }}>
+                <Icon name={t.icon} size={18} />
+                <span style={{ fontSize: 10, fontWeight: 500 }}>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </IOSDevice>
+  );
+}
+
+function MobileHome({ state, dispatch, heroLevel }) {
+  const todayISO = dateISO(today);
+  const todayAgenda = state.agenda.filter(t => t.date === todayISO).sort((a,b) => a.time.localeCompare(b.time));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* XP hero */}
+      <div className="card" style={{ padding: 16, background: 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 12%, var(--surface)), var(--surface))' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>Aventureiro</div>
+            <div className="serif" style={{ fontSize: 24, lineHeight: 1 }}>Nível {heroLevel.level}</div>
+          </div>
+          <div className="mono" style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>
+            +{state.xpGainedToday} XP hoje
+          </div>
+        </div>
+        <div className="xp-bar thick" style={{ marginTop: 12 }}>
+          <div className="fill" style={{ width: `${heroLevel.progress * 100}%`, '--hue': 'var(--accent)' }} />
+        </div>
+        <div className="mono" style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>{heroLevel.xpInLevel}/{heroLevel.xpToNext}</div>
+      </div>
+
+      {/* Attributes mini */}
+      <div className="card" style={{ padding: 16 }}>
+        <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>Atributos</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {ATTRIBUTES.map(a => {
+            const lvl = deriveLevel(state.attrXp[a.id]);
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <LevelBadge level={lvl.level} size={22} hue={a.hue} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 2 }}>{a.abbr}</div>
+                  <div className="xp-bar" style={{ height: 4 }}>
+                    <div className="fill" style={{ width: `${lvl.progress * 100}%`, '--hue': a.hue }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Today agenda */}
+      <div className="card" style={{ padding: 16 }}>
+        <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>Agenda</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {todayAgenda.slice(0, 5).map(t => {
+            const area = AREAS_SEED.find(a => a.id === t.area);
+            return (
+              <div key={t.id}
+                onClick={() => dispatch({ type: 'toggleAgenda', id: t.id })}
+                style={{
+                  display: 'grid', gridTemplateColumns: '18px 50px 1fr', gap: 10,
+                  alignItems: 'center', fontSize: 13,
+                  padding: '4px 0',
+                }}>
+                <Checkbox checked={t.done} onChange={() => dispatch({ type: 'toggleAgenda', id: t.id })} />
+                <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{t.time}</span>
+                <span style={{
+                  color: t.done ? 'var(--ink-4)' : 'var(--ink)',
+                  textDecoration: t.done ? 'line-through' : 'none',
+                  borderLeft: `2px solid ${area.color}`, paddingLeft: 8,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{t.title}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Habits quick */}
+      <div className="card" style={{ padding: 16 }}>
+        <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>Hábitos de hoje</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {state.habits.slice(0, 4).map(h => {
+            const attr = ATTRIBUTES.find(a => a.id === h.attr);
+            const done = h.done[3] === 1;
+            return (
+              <div key={h.id} onClick={() => dispatch({ type: 'toggleHabit', id: h.id, day: 3 })}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                <Checkbox checked={done} onChange={() => dispatch({ type: 'toggleHabit', id: h.id, day: 3 })} />
+                <span style={{ flex: 1, fontSize: 13, color: done ? 'var(--ink-3)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none' }}>
+                  {h.name}
+                </span>
+                <span style={{ color: attr.hue, fontSize: 12 }}>{attr.icon}</span>
+                <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>+{h.xp}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileHabits({ state, dispatch }) {
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      {state.habits.map((h, i) => {
+        const attr = ATTRIBUTES.find(a => a.id === h.attr);
+        const done = h.done[3] === 1;
+        return (
+          <div key={h.id}
+            onClick={() => dispatch({ type: 'toggleHabit', id: h.id, day: 3 })}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: i < state.habits.length - 1 ? '1px solid var(--line)' : 'none' }}
+          >
+            <Checkbox checked={done} onChange={() => dispatch({ type: 'toggleHabit', id: h.id, day: 3 })} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, color: done ? 'var(--ink-3)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none' }}>{h.name}</div>
+              <div style={{ display: 'flex', gap: 8, fontSize: 11, marginTop: 3 }}>
+                <span style={{ color: attr.hue, fontWeight: 500 }}>{attr.icon} {attr.abbr}</span>
+                <Streak n={h.streak} />
+              </div>
+            </div>
+            <span className="mono" style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>+{h.xp}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MobilePara() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {['Projects', 'Areas', 'Resources', 'Archives'].map((label, i) => {
+        const counts = [PROJECTS_SEED.length, AREAS_SEED.length, RESOURCES_SEED.length, ARCHIVES_SEED.length];
+        return (
+          <div key={label} className="card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 500 }}>
+              {label.charAt(0)} · {label}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+              <div className="serif" style={{ fontSize: 20 }}>{label === 'Projects' ? 'Projetos' : label === 'Areas' ? 'Áreas' : label === 'Resources' ? 'Recursos' : 'Arquivos'}</div>
+              <div className="mono" style={{ fontSize: 13, color: 'var(--ink-3)' }}>{counts[i]} itens</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MobileStats({ state }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="card" style={{ padding: 16 }}>
+        <div className="serif" style={{ fontSize: 16, marginBottom: 10 }}>XP por atributo (30d)</div>
+        {ATTRIBUTES.map(a => {
+          const series = XP_HISTORY.slice(-30).map(d => d[a.id]);
+          const delta = Math.round(series[series.length - 1] - series[0]);
+          return (
+            <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 60px', gap: 8, alignItems: 'center', padding: '6px 0' }}>
+              <span style={{ fontSize: 11, color: a.hue, fontWeight: 500 }}>{a.icon} {a.abbr}</span>
+              <Sparkline data={series} color={a.hue} width={180} height={22} />
+              <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', textAlign: 'right' }}>+{delta}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══ screens-login.jsx ═══
+// screens-login.jsx — Local-first login / character creation
+
+const LOGIN_KEY = 'evoquest:user:v1';
+
+function loadUser() {
+  try {
+    const raw = localStorage.getItem(LOGIN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveUser(u) {
+  try { localStorage.setItem(LOGIN_KEY, JSON.stringify(u)); } catch {}
+}
+function clearUser() {
+  try { localStorage.removeItem(LOGIN_KEY); } catch {}
+}
+
+const CLASSES = [
+  { id: 'sage',     name: 'Erudito',       desc: 'Foco em conhecimento e estudo',        icon: '◇', primary: 'inteligencia', secondary: 'sabedoria' },
+  { id: 'warrior',  name: 'Guerreiro',     desc: 'Força física e resiliência',           icon: '◆', primary: 'forca',        secondary: 'vitalidade' },
+  { id: 'monk',     name: 'Monge',         desc: 'Disciplina e equilíbrio mental',       icon: '◒', primary: 'equilibrio',   secondary: 'disciplina' },
+  { id: 'ranger',   name: 'Explorador',    desc: 'Vitalidade, foco em aventuras',        icon: '◐', primary: 'vitalidade',   secondary: 'foco' },
+  { id: 'artisan',  name: 'Artesão',       desc: 'Criador, foco em construir coisas',    icon: '◎', primary: 'foco',         secondary: 'forca' },
+  { id: 'ascetic',  name: 'Asceta',        desc: 'Resiliência e auto-superação',         icon: '◑', primary: 'resiliencia',  secondary: 'disciplina' },
+];
+
+const AVATAR_GLYPHS = ['◆','◇','◈','◉','◎','◐','◑','◒','✦','✧','☽','☼','◯','△','▲','✶'];
+const AVATAR_COLORS = [
+  '#8B6F47', '#A85A3C', '#5E7A4A', '#4A7A7A',
+  '#4A5788', '#6B5B8A', '#9A7B3F', '#2F6B52',
+];
+
+function LoginScreen({ onLogin }) {
+  const [step, setStep] = React.useState('intro'); // intro | create | welcome
+  const [name, setName] = React.useState('');
+  const [cls, setCls]   = React.useState('sage');
+  const [glyph, setGlyph] = React.useState('◆');
+  const [color, setColor] = React.useState('#8B6F47');
+
+  const canCreate = name.trim().length >= 2;
+
+  function create() {
+    if (!canCreate) return;
+    const user = {
+      name: name.trim(),
+      classId: cls,
+      avatar: { glyph, color },
+      createdAt: new Date().toISOString(),
+    };
+    saveUser(user);
+    setStep('welcome');
+    setTimeout(() => onLogin(user), 1400);
+  }
+
+  const selectedClass = CLASSES.find(c => c.id === cls);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'var(--bg)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      {/* Decorative bg */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: 'radial-gradient(ellipse at top left, color-mix(in oklch, var(--accent) 10%, transparent), transparent 50%), radial-gradient(ellipse at bottom right, color-mix(in oklch, var(--sabedoria) 8%, transparent), transparent 50%)',
+      }} />
+
+      {step === 'intro' && (
+        <div style={{ textAlign: 'center', maxWidth: 520, position: 'relative' }}>
+          <div style={{
+            width: 96, height: 96, margin: '0 auto 24px',
+            borderRadius: 24, border: '2px solid var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--surface)',
+          }}>
+            <span className="serif" style={{ fontSize: 56, fontStyle: 'italic', color: 'var(--ink)' }}>E</span>
+          </div>
+          <div style={{ fontSize: 12, letterSpacing: '0.12em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>EvoQuest · v1.0</div>
+          <div className="serif" style={{ fontSize: 56, lineHeight: 1.05, marginTop: 8, color: 'var(--ink)' }}>Comece sua jornada</div>
+          <div style={{ color: 'var(--ink-2)', fontSize: 15, marginTop: 14, lineHeight: 1.5 }}>
+            Um sistema de evolução pessoal estilo RPG. Acompanhe hábitos, bata metas, evolua seus atributos e construa a versão mais forte de você.
+          </div>
+          <button className="btn primary" onClick={() => setStep('create')} style={{
+            marginTop: 36, padding: '14px 28px', fontSize: 14, letterSpacing: '0.04em',
+          }}>
+            Criar personagem →
+          </button>
+          <div style={{ marginTop: 14, fontSize: 11, color: 'var(--ink-4)' }}>
+            Seus dados ficam apenas no seu dispositivo.
+          </div>
+        </div>
+      )}
+
+      {step === 'create' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, maxWidth: 960, width: '100%', position: 'relative' }}>
+          {/* Left: form */}
+          <div className="card" style={{ padding: 28 }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Passo 1 de 1</div>
+            <div className="serif" style={{ fontSize: 32, lineHeight: 1.1, marginTop: 4, color: 'var(--ink)' }}>Criar personagem</div>
+
+            {/* Name */}
+            <div style={{ marginTop: 20 }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Nome</label>
+              <input
+                value={name} onChange={e => setName(e.target.value)}
+                placeholder="Como você quer ser chamado?"
+                autoFocus
+                style={{
+                  width: '100%', marginTop: 6, padding: '10px 12px',
+                  background: 'var(--surface)', border: '1px solid var(--line)',
+                  borderRadius: 8, color: 'var(--ink)', fontSize: 14,
+                  fontFamily: 'inherit', outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Avatar glyph */}
+            <div style={{ marginTop: 18 }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Símbolo</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6, marginTop: 6 }}>
+                {AVATAR_GLYPHS.map(g => (
+                  <button key={g} onClick={() => setGlyph(g)}
+                    className={glyph === g ? 'avatar-swatch active' : 'avatar-swatch'}
+                    style={{ aspectRatio: '1', fontSize: 18 }}>
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color */}
+            <div style={{ marginTop: 18 }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cor</label>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                {AVATAR_COLORS.map(c => (
+                  <button key={c} onClick={() => setColor(c)}
+                    aria-label={c}
+                    style={{
+                      width: 32, height: 32, borderRadius: 8,
+                      background: c,
+                      border: color === c ? '3px solid var(--ink)' : '2px solid var(--line)',
+                      cursor: 'pointer', padding: 0,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Class */}
+            <div style={{ marginTop: 18 }}>
+              <label style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Classe</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+                {CLASSES.map(c => (
+                  <button key={c.id} onClick={() => setCls(c.id)}
+                    className={cls === c.id ? 'class-btn active' : 'class-btn'}
+                    style={{ textAlign: 'left', padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14 }}>{c.icon}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{c.name}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>{c.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
+              <button className="btn ghost" onClick={() => setStep('intro')} style={{ fontSize: 13 }}>← Voltar</button>
+              <button className="btn primary" onClick={create} disabled={!canCreate} style={{
+                flex: 1, padding: '10px 16px', fontSize: 14,
+                opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'not-allowed',
+              }}>
+                Começar jornada →
+              </button>
+            </div>
+          </div>
+
+          {/* Right: preview */}
+          <div className="card" style={{ padding: 28, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Prévia</div>
+
+            <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{
+                width: 88, height: 88, borderRadius: 20,
+                background: color,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontSize: 40,
+                boxShadow: '0 4px 20px color-mix(in oklch, ' + color + ' 35%, transparent)',
+              }}>{glyph}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="serif" style={{ fontSize: 28, lineHeight: 1.1, color: 'var(--ink)' }}>
+                  {name.trim() || 'Aventureiro'}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>
+                  Nível 1 · {selectedClass.name}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24, fontSize: 12, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Atributos iniciais</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {ATTRIBUTES.map(a => {
+                const isPrimary = a.id === selectedClass.primary;
+                const isSecondary = a.id === selectedClass.secondary;
+                const bonus = isPrimary ? 3 : isSecondary ? 2 : 1;
+                return (
+                  <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: 10, alignItems: 'center', fontSize: 12 }}>
+                    <span style={{ color: 'var(--ink-2)' }}>
+                      <span style={{ color: a.hue, marginRight: 4 }}>{a.icon}</span>
+                      {a.name}
+                    </span>
+                    <div className="xp-bar"><div className="fill" style={{ width: `${bonus * 20}%`, '--hue': a.hue }} /></div>
+                    <span className="mono" style={{ fontSize: 10, color: isPrimary ? 'var(--accent)' : 'var(--ink-3)', fontWeight: isPrimary ? 600 : 400 }}>
+                      +{bonus}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 20, lineHeight: 1.5 }}>
+              Sua classe define um pequeno bônus inicial. Você pode focar em qualquer atributo ao longo da jornada — nada é permanente.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {step === 'welcome' && (
+        <div style={{ textAlign: 'center', position: 'relative', animation: 'fadeUp 0.6s ease' }}>
+          <div style={{
+            width: 120, height: 120, margin: '0 auto 24px',
+            borderRadius: 28, background: color,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontSize: 56,
+            boxShadow: '0 8px 40px color-mix(in oklch, ' + color + ' 45%, transparent)',
+            animation: 'pop 0.5s cubic-bezier(.2,1.4,.3,1)',
+          }}>{glyph}</div>
+          <div style={{ fontSize: 12, letterSpacing: '0.12em', color: 'var(--ink-3)', textTransform: 'uppercase', fontWeight: 500 }}>Personagem criado</div>
+          <div className="serif" style={{ fontSize: 48, lineHeight: 1.05, marginTop: 8, color: 'var(--ink)' }}>
+            Bem-vindo, {name.trim()}.
+          </div>
+          <div style={{ color: 'var(--ink-3)', fontSize: 14, marginTop: 10 }}>
+            Sua jornada começa agora…
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══ app.jsx ═══
+// app.jsx — main app shell with sidebar, state, tweaks
+
+const STORAGE_KEY = 'evoquest:state:v1';
+const TWEAKS_KEY = 'evoquest:tweaks:v1';
+
+function loadSaved(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+const EMPTY_ATTR_XP = {
+  forca: 0, inteligencia: 0, sabedoria: 0, disciplina: 0,
+  foco: 0, vitalidade: 0, resiliencia: 0, equilibrio: 0,
+};
+
+// Apply class bonus (primary +3, secondary +2, others +1 → XP multiplier)
+function attrXpFromClass(classId) {
+  const cls = (CLASSES || []).find(c => c.id === classId);
+  const base = { ...EMPTY_ATTR_XP };
+  if (!cls) return base;
+  // Small starting XP so player sees bars filled slightly — feels like "you begin with latent talent"
+  for (const k of Object.keys(base)) {
+    base[k] = k === cls.primary ? 60 : k === cls.secondary ? 40 : 20;
+  }
+  return base;
+}
+
+const INITIAL_STATE = {
+  attrXp: { ...EMPTY_ATTR_XP },
+  habits: [],
+  agenda: [],
+  quests: [],
+  projects: [],
+  areas: [],
+  resources: [],
+  archives: [],
+  xpGainedToday: 0,
+  toasts: [],
+  workouts: [],
+  meals: [],
+  waterToday: 0,
+};
+
+function reducer(state, action) {
+  switch (action.type) {
+    case 'toggleHabit': {
+      const habits = state.habits.map(h => {
+        if (h.id !== action.id) return h;
+        const done = [...h.done];
+        const was = done[action.day];
+        done[action.day] = was === 1 ? 0 : 1;
+        return { ...h, done, streak: was === 1 ? Math.max(0, h.streak - 1) : h.streak + 1 };
+      });
+      const habit = state.habits.find(h => h.id === action.id);
+      const was = habit.done[action.day];
+      const delta = was === 1 ? -habit.xp : habit.xp;
+      const attrXp = { ...state.attrXp, [habit.attr]: Math.max(0, state.attrXp[habit.attr] + delta) };
+      const xpGainedToday = Math.max(0, state.xpGainedToday + delta);
+      const toasts = delta > 0 ? [...state.toasts, { id: Date.now(), xp: delta, attr: habit.attr, name: habit.name }] : state.toasts;
+      return { ...state, habits, attrXp, xpGainedToday, toasts };
+    }
+    case 'toggleAgenda': {
+      const task = state.agenda.find(t => t.id === action.id);
+      const agenda = state.agenda.map(t => t.id === action.id ? { ...t, done: !t.done } : t);
+      // small XP for task completion
+      const delta = task.done ? -10 : 10;
+      const attrBucket = task.area === 'a1' ? 'foco' : task.area === 'a2' ? 'inteligencia' : task.area === 'a3' ? 'vitalidade' : 'disciplina';
+      const attrXp = { ...state.attrXp, [attrBucket]: Math.max(0, state.attrXp[attrBucket] + delta) };
+      const xpGainedToday = Math.max(0, state.xpGainedToday + delta);
+      const toasts = delta > 0 ? [...state.toasts, { id: Date.now(), xp: delta, attr: attrBucket, name: task.title }] : state.toasts;
+      return { ...state, agenda, attrXp, xpGainedToday, toasts };
+    }
+    case 'addAgenda': {
+      return { ...state, agenda: [...state.agenda, action.task] };
+    }
+    case 'deleteAgenda': {
+      return { ...state, agenda: state.agenda.filter(t => t.id !== action.id) };
+    }
+    case 'dismissToast': {
+      return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) };
+    }
+    case 'initCharacter': {
+      // Fresh start: reset everything + seed attribute XP from the chosen class
+      return { ...INITIAL_STATE, attrXp: attrXpFromClass(action.classId) };
+    }
+    case 'wipeAll': {
+      return { ...INITIAL_STATE };
+    }
+    case 'addProject': {
+      return { ...state, projects: [action.project, ...(state.projects || [])] };
+    }
+    case 'addArea': {
+      return { ...state, areas: [action.area, ...(state.areas || [])] };
+    }
+    case 'deleteArea': {
+      return { ...state, areas: (state.areas || []).filter(a => a.id !== action.id) };
+    }
+    case 'addResource': {
+      return { ...state, resources: [action.resource, ...(state.resources || [])] };
+    }
+    case 'deleteResource': {
+      return { ...state, resources: (state.resources || []).filter(r => r.id !== action.id) };
+    }
+    case 'addArchive': {
+      return { ...state, archives: [action.archive, ...(state.archives || [])] };
+    }
+    case 'addHabit': {
+      return { ...state, habits: [...state.habits, action.habit] };
+    }
+    case 'updateHabit': {
+      return { ...state, habits: state.habits.map(h => h.id === action.id ? { ...h, ...action.patch } : h) };
+    }
+    case 'deleteHabit': {
+      return { ...state, habits: state.habits.filter(h => h.id !== action.id) };
+    }
+    case 'deleteProject': {
+      return { ...state, projects: (state.projects || []).filter(p => p.id !== action.id) };
+    }
+    case 'toggleExercise': {
+      const workouts = state.workouts.map(w => {
+        if (w.id !== action.wId) return w;
+        return {
+          ...w,
+          exercises: w.exercises.map((ex, i) => i === action.idx ? { ...ex, done: !ex.done } : ex),
+        };
+      });
+      // grant XP to forca if done
+      const workout = state.workouts.find(w => w.id === action.wId);
+      const ex = workout.exercises[action.idx];
+      const delta = ex.done ? -8 : 8;
+      const attr = workout.kind === 'cardio' ? 'vitalidade' : workout.kind === 'mob' ? 'equilibrio' : 'forca';
+      const attrXp = { ...state.attrXp, [attr]: Math.max(0, state.attrXp[attr] + delta) };
+      const xpGainedToday = Math.max(0, state.xpGainedToday + delta);
+      const toasts = delta > 0 ? [...state.toasts, { id: Date.now(), xp: delta, attr, name: EXERCISE_LIB.find(e => e.id === ex.exId)?.name || 'Exercício' }] : state.toasts;
+      return { ...state, workouts, attrXp, xpGainedToday, toasts };
+    }
+    case 'updateExercise': {
+      const workouts = state.workouts.map(w => {
+        if (w.id !== action.wId) return w;
+        return {
+          ...w,
+          exercises: w.exercises.map((ex, i) => i === action.idx ? { ...ex, [action.field]: action.value } : ex),
+        };
+      });
+      return { ...state, workouts };
+    }
+    case 'addExercise': {
+      const workouts = state.workouts.map(w => {
+        if (w.id !== action.wId) return w;
+        return {
+          ...w,
+          exercises: [...w.exercises, { exId: action.exId, sets: 3, reps: '10-12', load: '—', rest: 60, done: false }],
+        };
+      });
+      return { ...state, workouts };
+    }
+    case 'removeExercise': {
+      const workouts = state.workouts.map(w => {
+        if (w.id !== action.wId) return w;
+        return { ...w, exercises: w.exercises.filter((_, i) => i !== action.idx) };
+      });
+      return { ...state, workouts };
+    }
+    case 'updateFoodQty': {
+      const meals = state.meals.map(m => {
+        if (m.id !== action.mId) return m;
+        return { ...m, items: m.items.map((it, i) => i === action.idx ? { ...it, qty: action.qty } : it) };
+      });
+      return { ...state, meals };
+    }
+    case 'removeFood': {
+      const meals = state.meals.map(m => {
+        if (m.id !== action.mId) return m;
+        return { ...m, items: m.items.filter((_, i) => i !== action.idx) };
+      });
+      return { ...state, meals };
+    }
+    case 'addFood': {
+      const meals = state.meals.map(m => {
+        if (m.id !== action.mId) return m;
+        const food = FOOD_LIB.find(f => f.id === action.foodId);
+        return { ...m, items: [...m.items, { foodId: action.foodId, qty: food?.base || 100, note: '' }] };
+      });
+      return { ...state, meals };
+    }
+    case 'addWater': {
+      return { ...state, waterToday: Math.max(0, Math.min(5000, state.waterToday + action.amount)) };
+    }
+    default:
+      return state;
+  }
+}
+
+// ── TWEAKS (persisted) ─────────────────────────────────────────
+const TWEAKS_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "paper",
+  "chartStyle": "area",
+  "showMobile": true,
+  "accentName": "tan"
+}/*EDITMODE-END*/;
+
+const ACCENT_PRESETS = {
+  tan:    { light: '#8B6F47', dark: '#C9A56B' },
+  sage:   { light: '#5E7A4A', dark: '#A8C48E' },
+  indigo: { light: '#4A5788', dark: '#8EA4D4' },
+  plum:   { light: '#6B5B8A', dark: '#B4A2D0' },
+  ember:  { light: '#A85A3C', dark: '#DE9A7B' },
+};
+
+function App() {
+  const [user, setUser] = React.useState(() => loadUser());
+  const [state, dispatch] = React.useReducer(reducer, INITIAL_STATE, (init) => {
+    const saved = loadSaved(STORAGE_KEY);
+    if (!saved) return init;
+    // merge saved over initial so new fields (from seed updates) don't break
+    return { ...init, ...saved, toasts: [] };
+  });
+  const [screen, setScreen] = React.useState(() => localStorage.getItem('evoquest:screen') || 'home');
+  const [tweaks, setTweaks] = React.useState(() => ({ ...TWEAKS_DEFAULTS, ...(loadSaved(TWEAKS_KEY) || {}) }));
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+
+  // Persist state (debounced via rAF)
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      try {
+        const { toasts, ...persistable } = state;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
+      } catch {}
+    });
+    return () => cancelAnimationFrame(id);
+  }, [state]);
+
+  // Persist screen
+  React.useEffect(() => { try { localStorage.setItem('evoquest:screen', screen); } catch {} }, [screen]);
+
+  // Persist tweaks
+  React.useEffect(() => {
+    try { localStorage.setItem(TWEAKS_KEY, JSON.stringify(tweaks)); } catch {}
+  }, [tweaks]);
+
+  // Tweaks protocol
+  React.useEffect(() => {
+    function handler(e) {
+      if (e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    }
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const updateTweak = (key, val) => {
+    const next = { ...tweaks, [key]: val };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+  };
+
+  // Apply theme
+  React.useEffect(() => {
+    document.documentElement.dataset.theme = tweaks.theme === 'paper' ? '' : tweaks.theme;
+    const accent = ACCENT_PRESETS[tweaks.accentName] || ACCENT_PRESETS.tan;
+    document.documentElement.style.setProperty('--accent', tweaks.theme === 'ink' ? accent.dark : accent.light);
+  }, [tweaks.theme, tweaks.accentName]);
+
+  // Auto-dismiss toasts
+  React.useEffect(() => {
+    if (state.toasts.length === 0) return;
+    const id = state.toasts[state.toasts.length - 1].id;
+    const t = setTimeout(() => dispatch({ type: 'dismissToast', id }), 2400);
+    return () => clearTimeout(t);
+  }, [state.toasts]);
+
+  function handleLogin(u) {
+    // fresh character — seed attrs from class and clear any stale state
+    dispatch({ type: 'initCharacter', classId: u.classId });
+    setUser(u);
+    setScreen('home');
+  }
+
+  function handleLogout() {
+    if (!confirm('Sair e voltar à tela de login? Seus dados continuam salvos.')) return;
+    clearUser();
+    setUser(null);
+  }
+
+  // Gate: show login until a user exists
+  if (!user) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      <Sidebar screen={screen} setScreen={setScreen} state={state} user={user} onLogout={handleLogout} />
+
+      <main style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+        <div className="slide-in" key={screen}>
+          {screen === 'home' && <DashboardScreen state={state} dispatch={dispatch} setScreen={setScreen} user={user} />}
+          {screen === 'daily' && <DailyScreen state={state} dispatch={dispatch} />}
+          {screen === 'weekly' && <WeeklyScreen state={state} dispatch={dispatch} />}
+          {screen === 'monthly' && <MonthlyScreen state={state} dispatch={dispatch} />}
+          {screen === 'habits' && <HabitsScreen state={state} dispatch={dispatch} />}
+          {screen === 'goals' && <GoalsScreen state={state} />}
+          {screen === 'projects' && <ParaScreen state={state} dispatch={dispatch} para="projects" />}
+          {screen === 'areas' && <ParaScreen state={state} dispatch={dispatch} para="areas" />}
+          {screen === 'resources' && <ParaScreen state={state} dispatch={dispatch} para="resources" />}
+          {screen === 'archives' && <ParaScreen state={state} dispatch={dispatch} para="archives" />}
+          {screen === 'character' && <CharacterScreen state={state} />}
+          {screen === 'charts' && <ChartsScreen state={state} tweaks={tweaks} />}
+          {screen === 'profile' && <ProfileScreen state={state} />}
+          {screen === 'workout' && <WorkoutScreen state={state} dispatch={dispatch} />}
+          {screen === 'diet' && <DietScreen state={state} dispatch={dispatch} />}
+          {screen === 'mobile' && (
+            <div style={{ padding: 48, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '100%' }}>
+              <MobileApp state={state} dispatch={dispatch} tweaks={tweaks} />
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* XP toasts */}
+      <div style={{ position: 'fixed', top: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 200, pointerEvents: 'none' }}>
+        {state.toasts.slice(-3).map(t => {
+          const attr = ATTRIBUTES.find(a => a.id === t.attr);
+          return (
+            <div key={t.id} className="slide-in" style={{
+              background: 'var(--ink)', color: 'var(--bg)',
+              padding: '10px 14px', borderRadius: 10,
+              display: 'flex', alignItems: 'center', gap: 10, minWidth: 240,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+            }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: attr.hue, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
+                {attr.icon}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>{t.name}</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>+{t.xp} XP · {attr.name}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tweaks panel */}
+      {tweaksOpen && (
+        <div style={{
+          position: 'fixed', bottom: 20, right: 20, width: 280, zIndex: 300,
+          background: 'var(--surface)', border: '1px solid var(--line)',
+          borderRadius: 14, padding: 16,
+          boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div className="serif" style={{ fontSize: 18 }}>Tweaks</div>
+            <button className="btn ghost" onClick={() => setTweaksOpen(false)} style={{ padding: 4 }}>✕</button>
+          </div>
+
+          <TweakGroup label="Tema">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+              {['paper', 'ink', 'forest', 'dusk'].map(t => (
+                <button key={t} onClick={() => updateTweak('theme', t)} style={{
+                  padding: '6px 4px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                  border: `1px solid ${tweaks.theme === t ? 'var(--accent)' : 'var(--line)'}`,
+                  background: tweaks.theme === t ? 'color-mix(in oklch, var(--accent) 12%, var(--surface))' : 'var(--surface)',
+                  color: 'var(--ink)',
+                  textTransform: 'capitalize',
+                }}>{t}</button>
+              ))}
+            </div>
+          </TweakGroup>
+
+          <TweakGroup label="Cor de destaque">
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries(ACCENT_PRESETS).map(([name, colors]) => (
+                <button key={name} onClick={() => updateTweak('accentName', name)} style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: tweaks.theme === 'ink' ? colors.dark : colors.light,
+                  border: tweaks.accentName === name ? '3px solid var(--ink)' : '1px solid var(--line)',
+                  cursor: 'pointer',
+                }} title={name} />
+              ))}
+            </div>
+          </TweakGroup>
+
+          <TweakGroup label="Estilo de gráfico">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+              {['line', 'area', 'bars'].map(s => (
+                <button key={s} onClick={() => updateTweak('chartStyle', s)} style={{
+                  padding: '6px 4px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                  border: `1px solid ${tweaks.chartStyle === s ? 'var(--accent)' : 'var(--line)'}`,
+                  background: tweaks.chartStyle === s ? 'color-mix(in oklch, var(--accent) 12%, var(--surface))' : 'var(--surface)',
+                  color: 'var(--ink)',
+                  textTransform: 'capitalize',
+                }}>{s}</button>
+              ))}
+            </div>
+          </TweakGroup>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TweakGroup({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Sidebar({ screen, setScreen, state, user, onLogout }) {
+  const { attrXp } = state;
+  const totalXp = Object.values(attrXp).reduce((a, b) => a + b, 0);
+  const heroLevel = deriveLevel(totalXp);
+  const userCls = (CLASSES || []).find(c => c.id === user?.classId);
+  const displayName = user?.name || 'Aventureiro';
+  const avatarGlyph = user?.avatar?.glyph || '◆';
+  const avatarColor = user?.avatar?.color || 'var(--accent)';
+
+  const items = [
+    { label: 'Dashboard', id: 'home', icon: 'home' },
+    { section: 'Agenda' },
+    { label: 'Diária', id: 'daily', icon: 'cal' },
+    { label: 'Semanal', id: 'weekly', icon: 'week' },
+    { label: 'Mensal', id: 'monthly', icon: 'month' },
+    { section: 'Sistema PARA' },
+    { label: 'Projects', id: 'projects', icon: 'target', letter: 'P' },
+    { label: 'Areas', id: 'areas', icon: 'folder', letter: 'A' },
+    { label: 'Resources', id: 'resources', icon: 'folder', letter: 'R' },
+    { label: 'Archives', id: 'archives', icon: 'archive', letter: 'A' },
+    { section: 'Hábitos & Quests' },
+    { label: 'Hábitos', id: 'habits', icon: 'habit' },
+    { label: 'Quests', id: 'goals', icon: 'trophy' },
+    { section: 'Corpo' },
+    { label: 'Treino', id: 'workout', icon: 'dumbbell' },
+    { label: 'Dieta', id: 'diet', icon: 'apple' },
+    { section: 'RPG' },
+    { label: 'Character Sheet', id: 'character', icon: 'char' },
+    { label: 'Gráficos de evolução', id: 'charts', icon: 'chart' },
+    { label: 'Perfil', id: 'profile', icon: 'user' },
+    { section: 'Demo' },
+    { label: 'Versão Mobile', id: 'mobile', icon: 'zap' },
+  ];
+
+  return (
+    <aside style={{
+      width: 240, flexShrink: 0, background: 'var(--bg-2)',
+      borderRight: '1px solid var(--line)', padding: '16px 12px',
+      display: 'flex', flexDirection: 'column', overflow: 'auto',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px 14px', borderBottom: '1px solid var(--line)' }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8,
+          background: avatarColor,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff', fontSize: 18,
+        }}>{avatarGlyph}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="serif" style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
+          <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            EvoQuest{userCls ? ` · ${userCls.name}` : ''}
+          </div>
+        </div>
+      </div>
+
+      {/* mini hero */}
+      <div style={{ padding: '12px 10px 10px', borderBottom: '1px solid var(--line)', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <LevelBadge level={heroLevel.level} size={32} hue="var(--accent)" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 500 }}>Nível {heroLevel.level}</div>
+            <div className="xp-bar" style={{ height: 4, marginTop: 3 }}>
+              <div className="fill" style={{ width: `${heroLevel.progress * 100}%`, '--hue': 'var(--accent)' }} />
+            </div>
+            <div className="mono" style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 2 }}>
+              +{state.xpGainedToday} XP hoje
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1 }}>
+        {items.map((it, i) => {
+          if (it.section) return <div key={i} className="sidebar-section-label">{it.section}</div>;
+          return (
+            <div key={it.id} className={`sidebar-item ${screen === it.id ? 'active' : ''}`} onClick={() => setScreen(it.id)}>
+              {it.letter ? (
+                <span className="serif" style={{ width: 14, fontSize: 14, color: 'var(--ink-3)' }}>{it.letter}</span>
+              ) : <Icon name={it.icon} size={14} />}
+              <span>{it.label}</span>
+            </div>
+          );
+        })}
+      </nav>
+
+      <div style={{ padding: '10px 10px 4px', borderTop: '1px solid var(--line)', marginTop: 8 }}>
+        <button onClick={onLogout} className="btn ghost" style={{
+          width: '100%', justifyContent: 'flex-start', gap: 8,
+          fontSize: 12, color: 'var(--ink-3)', padding: '6px 8px',
+        }}>
+          <Icon name="logout" size={12} /> Sair
+        </button>
+        <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 6, padding: '0 4px' }}>
+          Dica: ative <span style={{ color: 'var(--ink-3)' }}>Tweaks</span> para mudar tema
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+// Mount
+
+
+export default App;
